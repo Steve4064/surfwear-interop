@@ -348,13 +348,10 @@ services:
 
   # ================================================================= point d'entrée
   gateway:
-    image: nginx:1.27-alpine
+    build: { context: ., dockerfile: gateway/Dockerfile }
     restart: unless-stopped
     ports:
       - "${GATEWAY_PORT:-8080}:80"
-    volumes:
-      - ./gateway/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-      - ./portal:/usr/share/nginx/html:ro
     depends_on:
       identity-service:
         condition: service_healthy
