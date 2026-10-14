@@ -1,8 +1,8 @@
 {
   "shops": [
-    {"id": "SHOP-BIA", "name": "Surf Shack Biarritz", "city": "Biarritz", "connector": "rest", "email": "biarritz@boutiques.example", "api_key": "demo-key-biarritz"},
-    {"id": "SHOP-HOS", "name": "Hossegor Board Store", "city": "Hossegor", "connector": "rest", "email": "hossegor@boutiques.example", "api_key": "demo-key-hossegor"},
-    {"id": "SHOP-LAC", "name": "Lacanau Glisse", "city": "Lacanau", "connector": "csv", "email": "lacanau@boutiques.example", "api_key": "demo-key-lacanau"},
-    {"id": "SHOP-ARC", "name": "Arcachon Wave", "city": "Arcachon", "connector": "csv", "email": "arcachon@boutiques.example", "api_key": "demo-key-arcachon"}
+    {"id": "SHOP-BIA", "name": "Surf Shack Biarritz", "city": "Biarritz", "address": "12 avenue de la Grande Plage, 64200 Biarritz", "siret": "81234567800012", "contact_name": "Léa Etcheverry", "connector": "rest", "email": "biarritz@boutiques.example", "api_key": "demo-key-biarritz"},
+    {"id": "SHOP-HOS", "name": "Hossegor Board Store", "city": "Hossegor", "address": "3 place des Landais, 40150 Hossegor", "siret": "82345678900023", "contact_name": "Hugo Lafitte", "connector": "rest", "email": "hossegor@boutiques.example", "api_key": "demo-key-hossegor"},
+    {"id": "SHOP-LAC", "name": "Lacanau Glisse", "city": "Lacanau", "address": "8 boulevard de la Plage, 33680 Lacanau", "siret": "83456789000034", "contact_name": "Inès Dupuy", "connector": "csv", "email": "lacanau@boutiques.example", "api_key": "demo-key-lacanau"},
+    {"id": "SHOP-ARC", "name": "Arcachon Wave", "city": "Arcachon", "address": "21 boulevard de la Mer, 33120 Arcachon", "siret": "84567890100045", "contact_name": "Marc Bordenave", "connector": "csv", "email": "arcachon@boutiques.example", "api_key": "demo-key-arcachon"}
   ]
 }

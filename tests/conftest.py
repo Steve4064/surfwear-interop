@@ -1,7 +1,10 @@
-"""Écosystème complet en mémoire : tous les services, un bus en mémoire, SQLite.
+"""Écosystème complet en mémoire, derrière la passerelle locale.
 
-Les services communiquent exactement comme en production (REST entre services,
-événements sur le bus), sans Docker ni RabbitMQ.
+Tous les microservices tournent dans le processus de test, avec un bus en mémoire
+et SQLite. Les requêtes passent par la passerelle locale (mêmes règles d'accès que
+Nginx) : le contrôle d'accès est donc testé de bout en bout. Le service Identité
+utilise les comptes locaux (AUTH_PROVIDER=local) ; l'intégration ZITADEL est testée
+à part avec un faux fournisseur OIDC (test_zitadel.py).
 """
 from __future__ import annotations
 
@@ -14,56 +17,44 @@ import httpx
 import pytest_asyncio
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "libs" / "common"))
-for service in (ROOT / "services").iterdir():
-    sys.path.insert(0, str(service))
+sys.path.insert(0, str(ROOT / "scripts"))
 
-from erp_connector.main import create_app as create_erp  # noqa: E402
-from notification_service.main import create_app as create_notifications  # noqa: E402
-from order_service.main import create_app as create_orders  # noqa: E402
-from shop_connector.adapters import VendorARestAdapter, VendorBCsvAdapter  # noqa: E402
-from shop_connector.main import create_app as create_connector  # noqa: E402
-from shop_simulator.main import create_app as create_simulator  # noqa: E402
-from stock_service.main import create_app as create_stock  # noqa: E402
+from local_gateway import build_gateway  # noqa: E402
+from local_stack import CONFIG, PASSWORDS, asgi, build  # noqa: E402
 from surfwear_common.bus import MemoryBus  # noqa: E402
-
-SECRET = "test-secret"
-
-
-def client(app, name: str, **kw) -> httpx.AsyncClient:
-    return httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=f"http://{name}", **kw)
 
 
 @pytest_asyncio.fixture
 async def eco(tmp_path):
     bus = MemoryBus()
-    exchange = tmp_path / "exchange"
-    db = lambda name: f"sqlite+aiosqlite:///{tmp_path / name}.db"  # noqa: E731
+    apps, exchange = build(tmp_path, bus)
+    gateway = build_gateway(apps, CONFIG.parent / "portal")
+    clients: list[httpx.AsyncClient] = []
 
-    erp = create_erp(db("erp"), bus, catalog_file=str(ROOT / "config" / "catalog.json"))
-    erp_c = client(erp, "erp")
-    stock = create_stock(db("stock"), bus, erp_c)
-    stock_c = client(stock, "stock")
-    orders = create_orders(db("orders"), bus, stock_c, shops_file=str(ROOT / "config" / "shops.json"),
-                           users_file=str(ROOT / "config" / "users.json"), sweep_seconds=0, auth_secret="test")
-    simulator = create_simulator(secret=SECRET, exchange_dir=str(exchange))
-    sim_c = client(simulator, "sim")
-    conn_rest = create_connector(VendorARestAdapter(sim_c, SECRET), bus)
-    conn_csv = create_connector(VendorBCsvAdapter(str(exchange)), bus)
-    notif = create_notifications(bus, smtp_host="")
+    def client(**kw) -> httpx.AsyncClient:
+        c = asgi(gateway, "localhost", **kw)
+        clients.append(c)
+        return c
+
+    async def login(email: str) -> httpx.AsyncClient:
+        c = client()
+        r = await c.post("/api/auth/login", json={"username": email, "password": PASSWORDS[email]})
+        assert r.status_code == 200, r.text
+        return c
 
     async with AsyncExitStack() as stack:
-        for app in (erp, stock, orders, conn_rest, conn_csv, notif):
+        for name in ("warehouse", "stock", "identity", "catalog", "orders", "cart", "billing",
+                     "conn_rest", "conn_csv", "notifications"):
+            app = apps[name]
             await stack.enter_async_context(app.router.lifespan_context(app))
-        clients = [erp_c, stock_c, sim_c, client(orders, "orders"), client(notif, "notif"),
-                   client(conn_rest, "rest"), client(conn_csv, "csv")]
-        for c in clients:
-            stack.push_async_callback(c.aclose)
-        yield SimpleNamespace(
-            bus=bus, erp=erp_c, stock=stock_c, sim=sim_c, orders=clients[3], notif=clients[4],
-            conn_rest=clients[5], conn_csv=clients[6], simulator=simulator, exchange=exchange,
-            orders_app=orders,
-        )
+        stack.push_async_callback(lambda: _close(clients))
+        yield SimpleNamespace(bus=bus, apps=apps, exchange=exchange, client=client, login=login,
+                              sweep=apps["orders"].state.sweep_once, orders_session=apps["orders"].state.session)
+
+
+async def _close(clients):
+    for c in clients:
+        await c.aclose()
 
 
 def key(shop: str) -> dict:

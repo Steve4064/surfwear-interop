@@ -14,7 +14,10 @@ from surfwear_common.bus import EventBus, bus_from_url
 from surfwear_common.db import create_schema, make_engine, make_sessionmaker
 from surfwear_common.events import (
     ALLOCATION_UPDATED,
+    PRODUCT_CREATED,
+    PRODUCT_UPDATED,
     SHIPMENT_DISPATCHED,
+    STOCK_ADJUSTED,
     STOCK_INCOMING,
     STOCK_RECEIVED,
     Event,
@@ -49,7 +52,7 @@ def create_app(
     engine = make_engine(database_url or env("DATABASE_URL", "sqlite+aiosqlite:///./stock.db"))
     Session = make_sessionmaker(engine)
     bus = bus or bus_from_url(env("BUS_URL", "memory://"))
-    erp = erp_client or httpx.AsyncClient(base_url=env("ERP_URL", "http://erp-connector:8000"), timeout=5)
+    erp = erp_client or httpx.AsyncClient(base_url=env("ERP_URL", "http://warehouse-service:8000"), timeout=5)
 
     async def publish_all(events: list) -> None:
         for payload in events:
@@ -69,6 +72,15 @@ def create_app(
         async with Session.begin() as s:
             await logic.on_shipment(s, ShipmentDispatched(**event.data))
 
+    async def on_product(event: Event) -> None:
+        async with Session.begin() as s:
+            await logic.upsert_product(s, event.data)
+
+    async def on_adjusted(event: Event) -> None:
+        async with Session.begin() as s:
+            events = await logic.adjust_stock(s, event.data["sku"], int(event.data["on_hand"]))
+        await publish_all(events)
+
     async def bootstrap(retries: int = 60) -> None:
         """Synchronisation initiale : copie le catalogue et les lots de l'ERP si la base est vide."""
         async with Session() as s:
@@ -76,7 +88,7 @@ def create_app(
                 return
         for attempt in range(1, retries + 1):
             try:
-                resp = await erp.get("/erp/stock")
+                resp = await erp.get("/internal/stock")
                 resp.raise_for_status()
                 break
             except Exception as exc:
@@ -101,6 +113,8 @@ def create_app(
         bus.subscribe(f"{SERVICE}.stock", [STOCK_INCOMING, STOCK_RECEIVED],
                       lambda e: on_incoming(e) if e.type == STOCK_INCOMING else on_received(e))
         bus.subscribe(f"{SERVICE}.shipments", [SHIPMENT_DISPATCHED], on_shipment)
+        bus.subscribe(f"{SERVICE}.products", [PRODUCT_CREATED, PRODUCT_UPDATED], on_product)
+        bus.subscribe(f"{SERVICE}.adjustments", [STOCK_ADJUSTED], on_adjusted)
         await bus.connect()
         await bootstrap()
         yield
@@ -119,10 +133,10 @@ def create_app(
     async def health():
         return {"status": "ok", "service": SERVICE}
 
-    @app.get("/api/catalog", tags=["boutiques"], summary="Catalogue et disponibilité")
-    async def get_catalog():
+    @app.get("/internal/stock", tags=["interne"], summary="Disponibilité de toutes les références")
+    async def get_stock():
         async with Session() as s:
-            return await logic.catalog(s)
+            return await logic.stock_levels(s)
 
     @app.get("/api/availability/{sku}", tags=["boutiques"], summary="Disponibilité d'une quantité")
     async def get_availability(sku: str, qty: int = Query(1, gt=0, le=10_000)):

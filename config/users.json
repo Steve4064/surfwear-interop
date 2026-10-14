@@ -1,10 +1,10 @@
 {
-  "_comment": "Comptes de démonstration. Les mots de passe sont hachés au premier démarrage. À changer avant toute mise en ligne.",
+  "_comment": "Comptes du mode sans ZITADEL (AUTH_PROVIDER=local). Avec ZITADEL, les mêmes identifiants sont créés dans ZITADEL (voir zitadel-demo.json).",
   "users": [
-    {"username": "surfwear", "password": "Surfwear2026!", "role": "staff", "display_name": "Équipe Surfwear"},
-    {"username": "biarritz", "password": "Biarritz2026!", "role": "shop", "shop_id": "SHOP-BIA", "display_name": "Surf Shack Biarritz"},
-    {"username": "hossegor", "password": "Hossegor2026!", "role": "shop", "shop_id": "SHOP-HOS", "display_name": "Hossegor Board Store"},
-    {"username": "lacanau", "password": "Lacanau2026!", "role": "shop", "shop_id": "SHOP-LAC", "display_name": "Lacanau Glisse"},
-    {"username": "arcachon", "password": "Arcachon2026!", "role": "shop", "shop_id": "SHOP-ARC", "display_name": "Arcachon Wave"}
+    {"username": "equipe@surfwear.example", "password": "Surfwear2026!", "role": "staff", "display_name": "Équipe Surfwear"},
+    {"username": "biarritz@boutiques.example", "password": "Biarritz2026!", "role": "shop", "shop_id": "SHOP-BIA", "display_name": "Léa Etcheverry"},
+    {"username": "hossegor@boutiques.example", "password": "Hossegor2026!", "role": "shop", "shop_id": "SHOP-HOS", "display_name": "Hugo Lafitte"},
+    {"username": "lacanau@boutiques.example", "password": "Lacanau2026!", "role": "shop", "shop_id": "SHOP-LAC", "display_name": "Inès Dupuy"},
+    {"username": "arcachon@boutiques.example", "password": "Arcachon2026!", "role": "shop", "shop_id": "SHOP-ARC", "display_name": "Marc Bordenave"}
   ]
 }

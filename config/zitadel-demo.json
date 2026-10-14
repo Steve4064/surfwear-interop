@@ -1,0 +1,9 @@
+{
+  "_comment": "Organisations de démonstration créées dans ZITADEL au premier démarrage (une par boutique). Mots de passe à changer avant toute mise en ligne.",
+  "shops": [
+    {"shop_id": "SHOP-BIA", "name": "Surf Shack Biarritz", "email": "biarritz@boutiques.example", "password": "Biarritz2026!", "first_name": "Léa", "last_name": "Etcheverry"},
+    {"shop_id": "SHOP-HOS", "name": "Hossegor Board Store", "email": "hossegor@boutiques.example", "password": "Hossegor2026!", "first_name": "Hugo", "last_name": "Lafitte"},
+    {"shop_id": "SHOP-LAC", "name": "Lacanau Glisse", "email": "lacanau@boutiques.example", "password": "Lacanau2026!", "first_name": "Inès", "last_name": "Dupuy"},
+    {"shop_id": "SHOP-ARC", "name": "Arcachon Wave", "email": "arcachon@boutiques.example", "password": "Arcachon2026!", "first_name": "Marc", "last_name": "Bordenave"}
+  ]
+}

@@ -447,3 +447,40 @@ async def release_order(s: AsyncSession, order_id: str) -> dict:
     for sku in released:
         events += await rebalance(s, sku)
     return {"order_id": order_id, "released": released, "events": events}
+
+
+# --------------------------------------------------------------------------- #
+# Référentiel produits et inventaire                                           #
+# --------------------------------------------------------------------------- #
+async def upsert_product(s: AsyncSession, data: dict) -> None:
+    """Crée (stock à 0) ou met à jour la copie locale d'une fiche produit du Catalogue."""
+    p = await s.get(Product, data["sku"])
+    if p is None:
+        s.add(Product(sku=data["sku"], name=data["name"], category=data.get("category", ""),
+                      unit_price=data["unit_price"], on_hand=0, reserved=0))
+    else:
+        p.name, p.category, p.unit_price = data["name"], data.get("category", p.category), data["unit_price"]
+    await s.flush()
+
+
+async def adjust_stock(s: AsyncSession, sku: str, on_hand: int) -> list[AllocationUpdated]:
+    """Inventaire : le stock physique constaté remplace le stock connu.
+
+    Le stock ne descend jamais sous les quantités déjà réservées (elles sont dans les
+    colis en préparation) ; un surplus sert les reliquats en attente.
+    """
+    p = await s.get(Product, sku)
+    if p is None:
+        return []
+    p.on_hand = max(on_hand, p.reserved)
+    await s.flush()
+    return await rebalance(s, sku)
+
+
+async def stock_levels(s: AsyncSession) -> list[dict]:
+    rows = await catalog(s)
+    products = {p.sku: p for p in (await s.execute(select(Product))).scalars()}
+    for r in rows:
+        r["on_hand"] = products[r["sku"]].on_hand
+        r["reserved"] = products[r["sku"]].reserved
+    return rows

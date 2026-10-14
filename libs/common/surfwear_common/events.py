@@ -23,6 +23,12 @@ ALLOCATION_UPDATED = "allocation.updated"
 SHIPMENT_DISPATCHED = "shipment.dispatched"
 STOCK_RECEIVED = "stock.received"
 STOCK_INCOMING = "stock.incoming"
+STOCK_ADJUSTED = "stock.adjusted"
+PRODUCT_CREATED = "product.created"
+PRODUCT_UPDATED = "product.updated"
+INVOICE_ISSUED = "invoice.issued"
+SHOP_REGISTERED = "shop.registered"
+SHOP_APPROVED = "shop.approved"
 
 
 class Event(BaseModel):
@@ -47,7 +53,7 @@ class Event(BaseModel):
 class ShopRef(BaseModel):
     id: str
     name: str
-    connector: Literal["rest", "csv"]
+    connector: Literal["rest", "csv", "none"] = "none"
     email: str
 
 
@@ -113,3 +119,40 @@ class StockIncoming(BaseModel):
     sku: str
     qty: int
     eta: date
+
+
+class StockAdjusted(BaseModel):
+    """Correction d'inventaire : nouveau stock physique constaté pour une référence."""
+    sku: str
+    on_hand: int
+    delta: int
+    reason: str = ""
+
+
+class ProductPayload(BaseModel):
+    sku: str
+    name: str
+    category: str
+    unit_price: float
+    vat_rate: float = 0.20
+    description: str = ""
+    active: bool = True
+
+
+class InvoicePayload(BaseModel):
+    invoice_id: str
+    order_id: str
+    shipment_id: str
+    shop: ShopRef
+    total_ht: float
+    total_vat: float
+    total_ttc: float
+    due_date: date
+
+
+class ShopRegistered(BaseModel):
+    shop_id: str
+    name: str
+    city: str
+    email: str
+    status: str
