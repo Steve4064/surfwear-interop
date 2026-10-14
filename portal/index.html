@@ -3,104 +3,166 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Portail B2B Surfwear</title>
+  <title>Surfwear Pro</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Public+Sans:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-  <header class="top">
-    <div class="brand">
-      <span class="mark" aria-hidden="true"></span>
-      <div>
-        <strong>Surfwear</strong>
-        <small>Portail des boutiques</small>
-      </div>
+  <!-- ============================================================ connexion -->
+  <section id="login-view" class="login" hidden>
+    <div class="login-side">
+      <div class="wordmark">Surfwear <span>Pro</span></div>
+      <p class="login-pitch">Commandez pour votre boutique à toute heure. Le stock affiché est celui qui vous est vraiment réservé.</p>
+      <svg class="swell" viewBox="0 0 600 120" preserveAspectRatio="none" aria-hidden="true">
+        <path d="M0 70 C 80 30, 160 30, 240 62 S 400 104, 480 70 S 560 40, 600 52 L600 120 L0 120 Z"/>
+      </svg>
     </div>
-    <nav class="tabs" role="tablist">
-      <button role="tab" class="tab active" data-view="shop">Boutique</button>
-      <button role="tab" class="tab" data-view="warehouse">Entrepôt</button>
-    </nav>
-    <label class="shop-picker">
-      <span>Boutique connectée</span>
-      <select id="shop"></select>
-    </label>
-  </header>
+    <div class="login-main">
+      <form id="login-form" class="login-form" novalidate>
+        <h1>Connexion</h1>
+        <label>Identifiant
+          <input name="username" autocomplete="username" required autofocus>
+        </label>
+        <label>Mot de passe
+          <input name="password" type="password" autocomplete="current-password" required>
+        </label>
+        <p id="login-error" class="form-error" role="alert" hidden></p>
+        <button class="btn btn-primary btn-block" type="submit">Se connecter</button>
+      </form>
+      <details class="demo-accounts">
+        <summary>Comptes de démonstration</summary>
+        <p class="hint">Cliquez sur un compte pour remplir le formulaire.</p>
+        <ul id="demo-list"></ul>
+      </details>
+    </div>
+  </section>
 
-  <main>
-    <!-- ------------------------------------------------------ vue boutique -->
-    <section id="view-shop" class="view">
-      <div class="grid">
-        <article class="card wide">
-          <header class="card-head">
-            <h2>Catalogue et disponibilité</h2>
-            <p class="hint">Disponibilité en temps réel : stock réel moins les quantités déjà promises aux autres boutiques.</p>
-          </header>
-          <table class="table" id="catalog">
-            <thead>
-              <tr><th>Référence</th><th>Désignation</th><th class="num">Prix HT</th>
-                  <th class="num">Disponible</th><th>Prochains lots</th><th class="num">Quantité</th></tr>
-            </thead>
-            <tbody></tbody>
-          </table>
-          <div class="actions">
-            <span id="cart-summary" class="hint">Panier vide</span>
-            <button id="order-btn" class="primary" disabled>Passer la commande</button>
+  <!-- ============================================================ application -->
+  <div id="app-view" hidden>
+    <header class="topbar">
+      <div class="wordmark small">Surfwear <span>Pro</span></div>
+      <nav id="nav" class="nav" aria-label="Navigation principale"></nav>
+      <div class="who">
+        <span id="who-name"></span>
+        <button id="logout" class="btn btn-ghost">Se déconnecter</button>
+      </div>
+    </header>
+
+    <main id="main">
+      <!-- ---------------------------------------------------- boutique : catalogue -->
+      <section data-view="catalog" class="view" hidden>
+        <div class="view-head">
+          <div>
+            <h1>Catalogue</h1>
+            <p class="lede">Saisissez les quantités, puis pré-réservez : le stock vous est bloqué pendant <strong id="hold-minutes">15 minutes</strong>, le temps de finaliser.</p>
           </div>
-          <div id="order-result" class="result" hidden></div>
-        </article>
+          <div class="filters">
+            <input id="search" type="search" placeholder="Rechercher un article" aria-label="Rechercher un article">
+            <div id="categories" class="chips" role="group" aria-label="Catégories"></div>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="table catalog">
+            <thead>
+              <tr><th>Article</th><th class="num">Prix HT</th><th>Disponibilité</th><th class="num">Quantité</th></tr>
+            </thead>
+            <tbody id="catalog-body"></tbody>
+          </table>
+        </div>
+        <p id="catalog-empty" class="empty" hidden>Aucun article ne correspond à votre recherche.</p>
+      </section>
 
-        <article class="card wide">
-          <header class="card-head">
-            <h2>Mes commandes</h2>
-            <p class="hint">Mises à jour automatiquement : reliquats planifiés, réservés, expédiés.</p>
-          </header>
-          <div id="orders" class="orders"></div>
-        </article>
-      </div>
-    </section>
+      <!-- ---------------------------------------------------- boutique : commandes -->
+      <section data-view="orders" class="view" hidden>
+        <div class="view-head">
+          <div>
+            <h1>Mes commandes</h1>
+            <p class="lede">Suivi en direct : reliquats planifiés, réservés à l'arrivée des lots, expéditions.</p>
+          </div>
+          <div id="order-filter" class="segmented" role="group" aria-label="Filtrer les commandes"></div>
+        </div>
+        <div id="orders-list" class="orders"></div>
+      </section>
 
-    <!-- ------------------------------------------------------ vue entrepôt -->
-    <section id="view-warehouse" class="view" hidden>
-      <div class="grid">
-        <article class="card wide">
-          <header class="card-head row">
-            <div>
-              <h2>Liste de préparation</h2>
-              <p class="hint">Uniquement des quantités déjà réservées : aucun arbitrage entre boutiques au moment du colis.</p>
+      <!-- ---------------------------------------------------- Surfwear : vue d'ensemble -->
+      <section data-view="overview" class="view" hidden>
+        <div class="view-head"><div><h1>Vue d'ensemble</h1>
+          <p class="lede">L'activité des boutiques, mise à jour toutes les quelques secondes.</p></div></div>
+        <div id="kpis" class="kpis"></div>
+        <h2>Pré-réservations en cours</h2>
+        <div id="overview-pending"></div>
+        <h2>Dernières commandes</h2>
+        <div id="overview-recent"></div>
+      </section>
+
+      <!-- ---------------------------------------------------- Surfwear : commandes -->
+      <section data-view="all-orders" class="view" hidden>
+        <div class="view-head">
+          <div><h1>Commandes des boutiques</h1></div>
+          <div class="filters">
+            <select id="shop-filter" aria-label="Boutique"></select>
+            <div id="state-filter" class="segmented" role="group" aria-label="Filtrer par état"></div>
+          </div>
+        </div>
+        <div class="table-wrap"><table class="table">
+          <thead><tr><th>Commande</th><th>Boutique</th><th>État</th><th>Contenu</th><th class="num">Montant HT</th></tr></thead>
+          <tbody id="all-orders-body"></tbody>
+        </table></div>
+      </section>
+
+      <!-- ---------------------------------------------------- Surfwear : préparation -->
+      <section data-view="picking" class="view" hidden>
+        <div class="view-head">
+          <div><h1>Préparation</h1>
+            <p class="lede">Seules les commandes finalisées arrivent ici, avec des quantités déjà réservées.</p></div>
+          <button id="dispatch-all" class="btn btn-primary">Expédier tous les colis</button>
+        </div>
+        <div id="pickings"></div>
+        <h2>Bons de livraison émis</h2>
+        <div id="shipments"></div>
+      </section>
+
+      <!-- ---------------------------------------------------- Surfwear : production -->
+      <section data-view="production" class="view" hidden>
+        <div class="view-head"><div><h1>Production</h1>
+          <p class="lede">Annoncer un lot attribue une date aux reliquats en attente ; le réceptionner les rend expédiables.</p></div></div>
+        <div class="split">
+          <form id="lot-form" class="panel form">
+            <h2>Annoncer un lot</h2>
+            <label>Article <select name="sku" id="lot-sku"></select></label>
+            <div class="row2">
+              <label>Quantité <input name="qty" type="text" inputmode="numeric" value="20" required></label>
+              <label>Date prévue <input name="eta" type="date" required></label>
             </div>
-            <button id="dispatch-btn" class="primary">Expédier tous les colis</button>
-          </header>
-          <div id="pickings"></div>
-        </article>
-
-        <article class="card">
-          <header class="card-head"><h2>Annoncer un lot en production</h2></header>
-          <form id="lot-form" class="form">
-            <label>Référence <select name="sku" id="lot-sku"></select></label>
-            <label>Quantité <input name="qty" type="number" min="1" value="20" required></label>
-            <label>Date prévue <input name="eta" type="date" required></label>
-            <button class="primary" type="submit">Annoncer</button>
+            <button class="btn btn-primary" type="submit">Annoncer le lot</button>
           </form>
-        </article>
+          <div class="panel">
+            <h2>Lots attendus</h2>
+            <div id="lots"></div>
+          </div>
+        </div>
+      </section>
+    </main>
 
-        <article class="card">
-          <header class="card-head"><h2>Lots attendus</h2></header>
-          <div id="lots"></div>
-        </article>
-
-        <article class="card wide">
-          <header class="card-head"><h2>Bons de livraison émis</h2></header>
-          <div id="shipments"></div>
-        </article>
+    <!-- ---------------------------------------------------- bandeau panier / pré-réservation -->
+    <aside id="dock" class="dock" aria-live="polite" hidden>
+      <div id="dock-hold" class="dock-hold" hidden></div>
+      <div id="dock-cart" class="dock-cart" hidden>
+        <div class="cart-sum">
+          <strong id="cart-count"></strong>
+          <span id="cart-detail" class="hint"></span>
+        </div>
+        <div class="cart-actions">
+          <button id="cart-clear" class="btn btn-ghost">Vider</button>
+          <button id="cart-reserve" class="btn btn-primary">Pré-réserver</button>
+        </div>
       </div>
-    </section>
-  </main>
+    </aside>
+  </div>
 
-  <footer class="foot">
-    Prototype pédagogique · <a href="/svc/orders/docs">API Commandes</a> ·
-    <a href="/svc/stock/docs">API Stock</a> · <a href="/svc/erp/docs">API ERP</a> ·
-    <a href="/boutiques/">Logiciels boutiques simulés</a>
-  </footer>
-  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <div id="toasts" class="toasts" role="status" aria-live="polite"></div>
   <script src="app.js"></script>
 </body>
 </html>

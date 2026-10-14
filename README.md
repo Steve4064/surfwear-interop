@@ -6,8 +6,9 @@ Une entreprise de surfwear fournit une cinquantaine de boutiques en Aquitaine. A
 
 Ce dépôt implémente la solution TO BE décrite dans l'étude technique (question 6) :
 
-- les boutiques **commandent en ligne 24h/24**, depuis un portail ou directement depuis leur logiciel ;
-- le stock est **réservé dès la confirmation**, par une mise à jour atomique : la double réservation devient impossible ;
+- chaque boutique a **son compte** et commande en ligne 24h/24, depuis le portail ou directement depuis son logiciel ;
+- une commande est d'abord **pré-réservée** : le stock est bloqué pendant 15 minutes, le temps que la boutique la **finalise**. Sans finalisation, elle expire et le stock retourne aux autres boutiques ;
+- la réservation se fait par une mise à jour atomique : la double réservation devient impossible ;
 - chaque reliquat reçoit **une date de livraison**, calculée sur les lots en production, et il est réservé automatiquement à leur arrivée ;
 - l'ERP existant est **conservé** et relié par un connecteur ;
 - les logiciels des boutiques, **différents d'un éditeur à l'autre**, sont intégrés par des adaptateurs : webhook JSON pour l'éditeur A, fichier CSV pour l'éditeur B ;
@@ -119,14 +120,34 @@ docker compose down -v     # efface tout, pour repartir du jeu de données initi
 
 ## 3. Démonstration guidée
 
+### Cycle d'une commande
+
+```
+ Boutique          pré-réserve ──► [pending]  stock bloqué 15 min, compte à rebours
+                                      │
+                ┌─────────────────────┼──────────────────────┐
+                ▼                     ▼                      ▼
+           finalise              annule                  ne fait rien
+         [confirmed]           [cancelled]                [expired]
+   order.confirmed publié   stock rendu aussitôt   stock rendu à l'échéance
+   → entrepôt, boutiques,   ─────────────┬───────────────────┘
+     notifications                       ▼
+                     le stock rendu sert d'abord les reliquats
+                     des autres boutiques (ordre d'arrivée)
+```
+
+Tant qu'une commande n'est pas finalisée, rien ne part à l'entrepôt ni aux logiciels des boutiques. Une finalisation après l'échéance est refusée (HTTP 409). La durée se règle avec `HOLD_MINUTES` dans `.env`.
+
 ### Par le portail
 
+Connectez-vous avec un compte boutique (par exemple `biarritz`) :
+
 1. Sur <http://localhost:8080>, choisissez la boutique **Surf Shack Biarritz**. Commandez **12 lycras** (5 seulement en stock) et **3 t-shirts**.
-   La commande est confirmée immédiatement : 5 lycras réservés, 7 livrables le 02/11/2026.
+   Cliquez sur **Pré-réserver** : 5 lycras sont bloqués pour vous et 7 sont livrables le 02/11/2026. Un compte à rebours apparaît en bas de l'écran ; cliquez sur **Finaliser la commande**.
 2. Passez sur **Hossegor Board Store** : le lycra est affiché en rupture, et le lot du 02/11 n'a plus que 23 pièces libres. Les 5 pièces de Biarritz ne peuvent plus être promises à une autre boutique.
 3. Passez sur **Lacanau Glisse** (éditeur B) et commandez 2 ponchos. Le fichier CSV apparaît dans <http://localhost:8080/boutiques/>.
-4. Dans l'onglet **Entrepôt**, la liste de préparation ne contient que le stock réservé. Cliquez sur **Réceptionner** pour le lot `LOT-0001` : le reliquat de Biarritz passe en « réservé ».
-5. Cliquez sur **Expédier tous les colis**. Les bons de livraison partent sur le bus : le stock de la boutique de Biarritz est mis à jour dans son logiciel (éditeur A), un fichier `LIVRAISON` est déposé pour l'éditeur B, et les mails arrivent dans <http://localhost:8025>.
+4. Déconnectez-vous et connectez-vous avec le compte `surfwear`. Dans **Préparation**, la liste de préparation ne contient que le stock réservé. Dans **Production**, cliquez sur **Réceptionner** pour le lot `LOT-0001` : le reliquat de Biarritz passe en « réservé ».
+5. Dans **Préparation**, cliquez sur **Expédier tous les colis**. Les bons de livraison partent sur le bus : le stock de la boutique de Biarritz est mis à jour dans son logiciel (éditeur A), un fichier `LIVRAISON` est déposé pour l'éditeur B, et les mails arrivent dans <http://localhost:8025>.
 
 ### Par script
 
@@ -136,7 +157,21 @@ docker compose down -v     # efface tout, pour repartir du jeu de données initi
 
 Le script rejoue le même scénario en `curl`. Il vérifie aussi qu'une requête rejouée avec la même `Idempotency-Key` ne crée pas de doublon.
 
-### Clés d'API de démonstration
+### Comptes de démonstration
+
+| Compte | Mot de passe | Accès |
+| --- | --- | --- |
+| `biarritz` | `Biarritz2026!` | Boutique Surf Shack Biarritz (éditeur A) |
+| `hossegor` | `Hossegor2026!` | Boutique Hossegor Board Store (éditeur A) |
+| `lacanau` | `Lacanau2026!` | Boutique Lacanau Glisse (éditeur B) |
+| `arcachon` | `Arcachon2026!` | Boutique Arcachon Wave (éditeur B) |
+| `surfwear` | `Surfwear2026!` | Équipe Surfwear : vue d'ensemble, commandes de toutes les boutiques, préparation, production |
+
+Les comptes sont définis dans `config/users.json` et hachés (PBKDF2) au premier démarrage. Sur `localhost`, la page de connexion propose de les remplir d'un clic ; cette aide est masquée quand le portail est ouvert depuis une autre adresse (tunnel, réseau).
+
+### Clés d'API des logiciels de boutique
+
+Les logiciels des boutiques s'authentifient sans mot de passe, par une clé d'API :
 
 | Boutique | Éditeur | Clé (`X-API-Key`) |
 | --- | --- | --- |
@@ -155,15 +190,19 @@ Toutes les interfaces passent par la passerelle (`http://localhost:8080`).
 | --- | --- | --- |
 | `GET /api/catalog` | Stock | Catalogue, disponibilité immédiate, lots à venir |
 | `GET /api/availability/{sku}?qty=n` | Stock | Plan de livraison simulé pour une quantité (rien n'est réservé) |
-| `POST /api/orders` | Commandes | Passer une commande. En-têtes : `X-API-Key`, et `Idempotency-Key` (facultatif) |
+| `POST /api/auth/login` · `POST /api/auth/logout` · `GET /api/auth/me` | Commandes | Connexion (cookie de session HttpOnly, ou jeton `Authorization: Bearer`) |
+| `POST /api/orders` | Commandes | Pré-réserver une commande. `{"lines":[…], "confirm": true}` pour finaliser dans le même appel. En-tête `Idempotency-Key` facultatif |
+| `POST /api/orders/{id}/confirm` | Commandes | Finaliser une commande pré-réservée (409 si l'échéance est passée) |
+| `POST /api/orders/{id}/cancel` | Commandes | Annuler une pré-réservation : le stock est rendu immédiatement |
+| `GET /api/admin/orders` · `GET /api/admin/shops` | Commandes | Équipe Surfwear : toutes les commandes, boutiques |
 | `GET /api/orders` · `GET /api/orders/{id}` | Commandes | Suivi des commandes de la boutique authentifiée |
 | `GET /api/me` | Commandes | Boutique associée à la clé |
-| `GET /erp/stock` | ERP | Stock physique et lots en production |
+| `GET /erp/stock` | ERP | Stock physique et lots en production (`/erp/*` : équipe Surfwear uniquement) |
 | `GET /erp/pickings` | ERP | Liste de préparation |
 | `POST /erp/pickings/dispatch` | ERP | Expédier (corps `{"order_ids": [...]}`, ou `{}` pour tout expédier) |
 | `POST /erp/lots` | ERP | Annoncer un lot `{"sku","qty","eta"}` |
 | `POST /erp/receptions` | ERP | Réceptionner `{"lot_id"}`, ou `{"sku","qty"}` sans annonce préalable |
-| `GET /svc/<service>/docs` | tous | Documentation OpenAPI interactive (`stock`, `orders`, `erp`, `notifications`, `connector-rest`, `connector-csv`) |
+| `GET /svc/<service>/docs` | tous | Documentation OpenAPI en lecture (`stock`, `orders`, `erp`, `notifications`, `connector-rest`, `connector-csv`) ; les routes internes des services ne sont jamais exposées |
 
 Exemple de commande :
 
@@ -246,7 +285,20 @@ En production, ce répertoire serait un dépôt SFTP propre à chaque boutique.
 
 ---
 
-## 8. Disponibilité, scalabilité, résilience
+## 8. Disponibilité, scalabilité, résilience, sécurité
+
+**Contrôle d'accès.** La passerelle Nginx vérifie chaque requête protégée auprès du Service Commandes (`auth_request` sur `/api/auth/check`) :
+
+| Ressource | Accès |
+| --- | --- |
+| Portail, connexion, documentation OpenAPI | public |
+| Catalogue, disponibilité | toute session valide (boutique, Surfwear, clé d'API) |
+| Commandes d'une boutique | cette boutique uniquement |
+| `/api/admin/*`, `/erp/*`, logiciels simulés, supervision | équipe Surfwear |
+| Routes internes (`/internal/*`) | jamais exposées |
+
+Les mots de passe sont hachés en PBKDF2-SHA256 ; la session est un jeton signé HMAC (8 h) dans un cookie `HttpOnly`, `SameSite=Strict`, `Secure` derrière HTTPS. Les tentatives de connexion sont limitées à 10 par minute et par adresse. Changez `AUTH_SECRET` et les mots de passe de `config/users.json` avant toute mise en ligne.
+
 
 **Mise à l'échelle horizontale.** Les services Commandes et Stock sont sans état ; Nginx réinterroge le DNS de Docker toutes les 10 s.
 
@@ -284,6 +336,7 @@ python -m pytest -q            # ou : make test
 
 | Test | Ce qui est vérifié |
 | --- | --- |
+| `test_hold_and_auth.py` | Pré-réservation qui bloque le stock, finalisation idempotente, expiration qui rend le stock au reliquat d'une autre boutique, finalisation tardive refusée, annulation, connexion et rôles |
 | `test_full_flow` | Scénario complet : commande avec reliquat, idempotence, liste de préparation, webhook A, fichier CSV B, annonce de lot, réception, expédition, stock des boutiques, mails |
 | `test_concurrent_orders_never_oversell` | Deux commandes simultanées sur les 12 derniers articles : 12 réservés au total, jamais plus |
 | `test_catalog_and_availability` | Calcul de disponibilité et de date de livraison |
@@ -345,6 +398,8 @@ Chaque image est construite depuis la racine du dépôt, afin d'embarquer la bib
 | `POSTGRES_PASSWORD` | `surfwear` | Mot de passe PostgreSQL |
 | `RABBITMQ_USER` / `RABBITMQ_PASSWORD` | `surfwear` | Identifiants RabbitMQ |
 | `WEBHOOK_SECRET` | `change-me` | Secret HMAC partagé avec l'éditeur A |
+| `AUTH_SECRET` | `change-me-in-env-file` | Secret de signature des sessions |
+| `HOLD_MINUTES` | `15` | Durée de la pré-réservation avant expiration |
 | `LOG_LEVEL` | `INFO` | Niveau de journalisation |
 
 Ajouter une boutique : ajouter une ligne dans `config/shops.json`, puis `docker compose down -v && docker compose up -d`. Le registre est initialisé au premier démarrage.
@@ -358,12 +413,11 @@ Ajouter une boutique : ajouter une ligne dans `config/shops.json`, puis `docker 
 | ERP simulé par le connecteur | Connecteur branché sur l'API ou la base de l'ERP réel (lecture des réceptions, écriture des commandes) |
 | Publication d'événement après la transaction | Patron *transactional outbox* pour garantir la publication |
 | Dédoublonnage en mémoire (par instance) | Table des messages traités en base |
-| Clés d'API statiques | OAuth 2.0 *client credentials*, rotation des secrets |
+| Clés d'API statiques, comptes dans un fichier | OAuth 2.0 / OpenID Connect (annuaire de l'entreprise), rotation des secrets, gestion des comptes depuis l'interface |
 | Une seule instance PostgreSQL pour deux bases | Une base par service, répliquée |
 | RabbitMQ seul | Cluster RabbitMQ (files *quorum*) |
 | Dépôt de fichiers sur volume partagé | SFTP par boutique, ou EDIFACT (ORDERS, ORDRSP, DESADV) pour les éditeurs qui le proposent |
 | Docker Compose | Kubernetes ou Docker Swarm, avec réplicas et déploiement progressif |
-| Écran entrepôt sans authentification | Réseau interne et authentification des logisticiens |
 
 ---
 
@@ -374,5 +428,5 @@ Ajouter une boutique : ajouter une ligne dans `config/shops.json`, puis `docker 
 | `port is already allocated` | Changer `GATEWAY_PORT` dans `.env`, ou libérer 8080, 8025 et 15672 |
 | Un service reste `starting` | `docker compose logs <service>` : il attend généralement PostgreSQL ou RabbitMQ, et réessaie |
 | Le portail affiche « Erreur 502 » | Les services démarrent encore ; patienter puis rafraîchir |
-| Repartir des données initiales | `docker compose down -v && docker compose up -d --build` |
+| Repartir des données initiales (obligatoire après une mise à jour du schéma) | `docker compose down -v && docker compose up -d --build` |
 | Pas de mails dans Mailpit | `docker compose logs notification-service` |

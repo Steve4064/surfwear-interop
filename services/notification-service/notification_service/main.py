@@ -39,7 +39,7 @@ def render(event: Event) -> tuple[str, str]:
     d = event.data
     shop = d["shop"]["name"]
     if event.type == ORDER_CONFIRMED:
-        subject = f"Commande {d['order_id']} confirmée"
+        subject = f"Commande {d['order_id']} finalisée"
         intro = f"Bonjour {shop},\n\nVotre commande {d['order_id']} est enregistrée ({d['total_amount']:.2f} € HT)."
         return subject, "\n".join([intro, "", *order_lines(d), "", "Les quantités réservées partent à la prochaine expédition."])
     if event.type == ORDER_UPDATED:

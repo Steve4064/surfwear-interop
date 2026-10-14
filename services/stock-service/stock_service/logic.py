@@ -387,3 +387,63 @@ async def on_shipment(s: AsyncSession, data: ShipmentDispatched) -> None:
             else:
                 a.qty -= t
     await s.flush()
+
+
+# --------------------------------------------------------------------------- #
+# Libération d'une pré-réservation expirée ou annulée                          #
+# --------------------------------------------------------------------------- #
+async def rebalance(s: AsyncSession, sku: str) -> list[AllocationUpdated]:
+    """Sert les reliquats non planifiés (FIFO) avec le stock libre, puis avec les lots ouverts."""
+    out: list[AllocationUpdated] = []
+    for a in await _unscheduled(s, sku):
+        t = await take_from_stock(s, sku, a.qty)
+        if t:
+            rest = a.qty - t
+            _move(s, a, t, kind="stock", lot_id=None, eta=None)
+            out.append(AllocationUpdated(order_id=a.order_id, sku=sku, qty=t, status="reserved", previous="unscheduled"))
+            if not rest:
+                continue
+        for lot in await open_lots(s, sku):
+            if a.kind != "unscheduled" or a.qty <= 0:
+                break
+            t = await take_from_lot(s, lot.id, a.qty)
+            if t:
+                _move(s, a, t, kind="lot", lot_id=lot.id, eta=lot.eta)
+                out.append(AllocationUpdated(order_id=a.order_id, sku=sku, qty=t, status="scheduled",
+                                             previous="unscheduled", eta=lot.eta, lot_id=lot.id))
+        await s.flush()
+    return out
+
+
+async def release_order(s: AsyncSession, order_id: str) -> dict:
+    """Rend au stock tout ce qu'une commande non finalisée avait bloqué.
+
+    Idempotent : une commande déjà libérée n'a plus d'allocation.
+    Le stock rendu sert ensuite les reliquats des autres commandes (ordre d'arrivée).
+    """
+    allocs = (
+        await s.execute(select(Allocation).where(Allocation.order_id == order_id).order_by(Allocation.id))
+    ).scalars().all()
+    released: dict[str, int] = {}
+    for a in allocs:
+        if a.kind == "stock":
+            await s.execute(
+                update(Product).where(Product.sku == a.sku)
+                .values(reserved=Product.reserved - a.qty)
+                .execution_options(synchronize_session=False)
+            )
+        elif a.kind == "lot" and a.lot_id:
+            await s.execute(
+                update(Lot).where(Lot.id == a.lot_id)
+                .values(allocated=Lot.allocated - a.qty)
+                .execution_options(synchronize_session=False)
+            )
+        released[a.sku] = released.get(a.sku, 0) + a.qty
+        await s.execute(delete(Allocation).where(Allocation.id == a.id))
+    await s.flush()
+    s.expire_all()
+
+    events: list[AllocationUpdated] = []
+    for sku in released:
+        events += await rebalance(s, sku)
+    return {"order_id": order_id, "released": released, "events": events}

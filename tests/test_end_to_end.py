@@ -41,11 +41,11 @@ async def test_security_and_validation(eco):
 
 async def test_full_flow(eco):
     # 1. Biarritz (éditeur A) commande plus que le stock disponible de lycras
-    body = {"lines": [{"sku": "SW-LYC-004", "qty": 12}, {"sku": "SW-TSH-001", "qty": 3}]}
+    body = {"lines": [{"sku": "SW-LYC-004", "qty": 12}, {"sku": "SW-TSH-001", "qty": 3}], "confirm": True}
     r = await eco.orders.post("/api/orders", json=body, headers={**key("biarritz"), "Idempotency-Key": "k1"})
     assert r.status_code == 201
     bia = r.json()
-    assert bia["status"] == "backordered"
+    assert bia["status"] == "backordered" and bia["state"] == "confirmed"
     assert line(bia, "SW-LYC-004")["qty_reserved"] == 5
     assert line(bia, "SW-LYC-004")["scheduled"][0]["qty"] == 7
     assert line(bia, "SW-TSH-001")["qty_reserved"] == 3
@@ -55,13 +55,13 @@ async def test_full_flow(eco):
     assert r2.status_code == 200 and r2.json()["order_id"] == bia["order_id"]
 
     # 2. Hossegor veut 30 lycras : plus de stock, 23 sur le lot, 7 sans date
-    hos = (await eco.orders.post("/api/orders", json={"lines": [{"sku": "SW-LYC-004", "qty": 30}]},
+    hos = (await eco.orders.post("/api/orders", json={"lines": [{"sku": "SW-LYC-004", "qty": 30}], "confirm": True},
                                  headers=key("hossegor"))).json()
     l = line(hos, "SW-LYC-004")
     assert (l["qty_reserved"], sum(s["qty"] for s in l["scheduled"]), l["qty_unscheduled"]) == (0, 23, 7)
 
     # 3. Lacanau (éditeur B, CSV) commande des ponchos, en rupture mais attendus
-    lac = (await eco.orders.post("/api/orders", json={"lines": [{"sku": "SW-PON-005", "qty": 2}]},
+    lac = (await eco.orders.post("/api/orders", json={"lines": [{"sku": "SW-PON-005", "qty": 2}], "confirm": True},
                                  headers=key("lacanau"))).json()
     assert line(lac, "SW-PON-005")["scheduled"][0]["eta"] == "2026-11-09"
     await eco.bus.drain()
@@ -84,7 +84,7 @@ async def test_full_flow(eco):
     rows = list(csv.DictReader(files[0].open(encoding="utf-8", newline="")))
     assert rows[0]["record_type"] == "COMMANDE" and rows[0]["qty_planned"] == "2"
     notes = (await eco.notif.get("/notifications")).json()
-    assert len(notes) == 3 and all("confirmée" in n["subject"] for n in notes)
+    assert len(notes) == 3 and all("finalisée" in n["subject"] for n in notes)
 
     # 4. Un nouveau lot est annoncé : le reliquat sans date d'Hossegor est planifié
     lot = (await eco.erp.post("/erp/lots", json={"sku": "SW-LYC-004", "qty": 10, "eta": "2026-12-01"})).json()

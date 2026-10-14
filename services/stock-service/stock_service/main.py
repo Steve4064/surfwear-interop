@@ -141,6 +141,15 @@ def create_app(
             raise HTTPException(422, {"message": "Références inconnues", "skus": exc.skus})
         return {"order_id": req.order_id, "lines": lines}
 
+    @app.post("/internal/allocations/{order_id}/release", tags=["interne"],
+              summary="Libérer une pré-réservation expirée ou annulée")
+    async def release_allocations(order_id: str):
+        async with Session.begin() as s:
+            result = await logic.release_order(s, order_id)
+        await publish_all(result["events"])
+        return {"order_id": order_id, "released": result["released"],
+                "reallocated": len(result["events"])}
+
     @app.get("/internal/allocations/{order_id}", tags=["interne"])
     async def get_allocations(order_id: str):
         async with Session() as s:

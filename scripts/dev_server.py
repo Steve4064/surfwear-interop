@@ -50,7 +50,9 @@ def internal(app, name: str) -> httpx.AsyncClient:
 bus = MemoryBus()
 erp = create_erp(db("erp"), bus, catalog_file=str(ROOT / "config" / "catalog.json"))
 stock = create_stock(db("stock"), bus, internal(erp, "erp"))
-orders = create_orders(db("orders"), bus, internal(stock, "stock"), shops_file=str(ROOT / "config" / "shops.json"))
+orders = create_orders(db("orders"), bus, internal(stock, "stock"), shops_file=str(ROOT / "config" / "shops.json"),
+                       users_file=str(ROOT / "config" / "users.json"))
+orders_client = internal(orders, "orders")
 simulator = create_simulator(secret=SECRET, exchange_dir=str(DATA / "exchange"))
 conn_rest = create_connector(VendorARestAdapter(internal(simulator, "sim"), SECRET), bus)
 conn_csv = create_connector(VendorBCsvAdapter(str(DATA / "exchange")), bus)
@@ -83,6 +85,21 @@ async def lifespan():
         yield
 
 
+async def deny(send, status: int) -> None:
+    body = b'{"detail":"Connexion requise"}' if status == 401 else b'{"detail":"Acces refuse"}'
+    await send({"type": "http.response.start", "status": status,
+                "headers": [(b"content-type", b"application/json")]})
+    await send({"type": "http.response.body", "body": body})
+
+
+async def allowed(scope, role: str) -> int:
+    """Équivalent de l'auth_request Nginx : renvoie 204, 401 ou 403."""
+    headers = {k.decode(): v.decode() for k, v in scope["headers"]
+               if k.lower() in (b"cookie", b"authorization", b"x-api-key")}
+    r = await orders_client.get("/api/auth/check", params={"role": role}, headers=headers)
+    return r.status_code
+
+
 async def gateway(scope, receive, send):
     if scope["type"] == "lifespan":
         msg = await receive()
@@ -94,6 +111,14 @@ async def gateway(scope, receive, send):
         await send({"type": "lifespan.shutdown.complete"})
         return
     path = scope["path"]
+    if scope["type"] == "http":
+        need = "any" if path.startswith(("/api/catalog", "/api/availability")) else \
+            "staff" if path.startswith(("/erp/", "/boutiques")) or path in (
+                "/svc/notifications/notifications", "/svc/connector-rest/stats", "/svc/connector-csv/stats") else None
+        if need and (code := await allowed(scope, need)) != 204:
+            return await deny(send, code)
+        if path.startswith("/svc/") and "/internal/" in path:
+            return await deny(send, 403)
     if path.startswith(("/api/catalog", "/api/availability")):
         return await stock(scope, receive, send)
     if path.startswith("/api/"):

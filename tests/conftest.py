@@ -44,7 +44,8 @@ async def eco(tmp_path):
     erp_c = client(erp, "erp")
     stock = create_stock(db("stock"), bus, erp_c)
     stock_c = client(stock, "stock")
-    orders = create_orders(db("orders"), bus, stock_c, shops_file=str(ROOT / "config" / "shops.json"))
+    orders = create_orders(db("orders"), bus, stock_c, shops_file=str(ROOT / "config" / "shops.json"),
+                           users_file=str(ROOT / "config" / "users.json"), sweep_seconds=0, auth_secret="test")
     simulator = create_simulator(secret=SECRET, exchange_dir=str(exchange))
     sim_c = client(simulator, "sim")
     conn_rest = create_connector(VendorARestAdapter(sim_c, SECRET), bus)
@@ -61,6 +62,7 @@ async def eco(tmp_path):
         yield SimpleNamespace(
             bus=bus, erp=erp_c, stock=stock_c, sim=sim_c, orders=clients[3], notif=clients[4],
             conn_rest=clients[5], conn_csv=clients[6], simulator=simulator, exchange=exchange,
+            orders_app=orders,
         )
 
 

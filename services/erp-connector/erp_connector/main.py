@@ -149,6 +149,8 @@ def create_app(database_url: str | None = None, bus: EventBus | None = None,
         if a.status != "reserved":
             return
         async with Session.begin() as s:
+            if await s.get(ErpOrder, a.order_id) is None:
+                return  # commande pas encore finalisée : rien à préparer
             s.add(Picking(order_id=a.order_id, sku=a.sku, qty=a.qty))
 
     @asynccontextmanager

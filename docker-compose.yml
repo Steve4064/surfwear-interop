@@ -91,6 +91,9 @@ services:
       DATABASE_URL: postgresql+asyncpg://surfwear:${POSTGRES_PASSWORD:-surfwear}@postgres:5432/orders
       STOCK_URL: http://stock-service:8000
       SHOPS_FILE: /config/shops.json
+      USERS_FILE: /config/users.json
+      AUTH_SECRET: ${AUTH_SECRET:-change-me-in-env-file}
+      HOLD_MINUTES: ${HOLD_MINUTES:-15}
       ROOT_PATH: /svc/orders
     volumes:
       - ./config:/config:ro
