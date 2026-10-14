@@ -1,0 +1,8 @@
+{
+  "shops": [
+    {"id": "SHOP-BIA", "name": "Surf Shack Biarritz", "city": "Biarritz", "connector": "rest", "email": "biarritz@boutiques.example", "api_key": "demo-key-biarritz"},
+    {"id": "SHOP-HOS", "name": "Hossegor Board Store", "city": "Hossegor", "connector": "rest", "email": "hossegor@boutiques.example", "api_key": "demo-key-hossegor"},
+    {"id": "SHOP-LAC", "name": "Lacanau Glisse", "city": "Lacanau", "connector": "csv", "email": "lacanau@boutiques.example", "api_key": "demo-key-lacanau"},
+    {"id": "SHOP-ARC", "name": "Arcachon Wave", "city": "Arcachon", "connector": "csv", "email": "arcachon@boutiques.example", "api_key": "demo-key-arcachon"}
+  ]
+}

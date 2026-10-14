@@ -1,0 +1,17 @@
+{
+  "products": [
+    {"sku": "SW-TSH-001", "name": "T-shirt Logo Vague", "category": "Textile", "unit_price": 14.50, "on_hand": 120},
+    {"sku": "SW-SWT-002", "name": "Sweat à capuche Lacanau", "category": "Textile", "unit_price": 32.00, "on_hand": 40},
+    {"sku": "SW-BSH-003", "name": "Boardshort Hossegor", "category": "Bain", "unit_price": 27.00, "on_hand": 18},
+    {"sku": "SW-LYC-004", "name": "Lycra anti-UV manches longues", "category": "Bain", "unit_price": 24.00, "on_hand": 5},
+    {"sku": "SW-PON-005", "name": "Poncho éponge", "category": "Accessoire", "unit_price": 29.00, "on_hand": 0},
+    {"sku": "SW-CAS-006", "name": "Casquette trucker", "category": "Accessoire", "unit_price": 11.00, "on_hand": 60},
+    {"sku": "SW-WAX-007", "name": "Wax tropicale (lot de 5)", "category": "Accessoire", "unit_price": 6.50, "on_hand": 200},
+    {"sku": "SW-LEA-008", "name": "Leash 7 pieds", "category": "Accessoire", "unit_price": 17.00, "on_hand": 12}
+  ],
+  "lots": [
+    {"id": "LOT-0001", "sku": "SW-LYC-004", "qty": 30, "eta": "2026-11-02"},
+    {"id": "LOT-0002", "sku": "SW-PON-005", "qty": 25, "eta": "2026-11-09"},
+    {"id": "LOT-0003", "sku": "SW-BSH-003", "qty": 40, "eta": "2026-11-16"}
+  ]
+}

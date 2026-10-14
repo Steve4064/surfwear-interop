@@ -1,0 +1,178 @@
+name: surfwear
+
+# Variables communes à tous les services applicatifs
+x-app: &app
+  restart: unless-stopped
+  environment: &app-env
+    BUS_URL: amqp://${RABBITMQ_USER:-surfwear}:${RABBITMQ_PASSWORD:-surfwear}@rabbitmq:5672/
+    LOG_LEVEL: ${LOG_LEVEL:-INFO}
+  depends_on: &app-deps
+    rabbitmq:
+      condition: service_healthy
+
+services:
+  # ------------------------------------------------------------ infrastructure
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: surfwear
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-surfwear}
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U surfwear"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-surfwear}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-surfwear}
+    ports:
+      - "15672:15672"   # console d'administration
+    volumes:
+      - rabbit-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  mailpit:   # boîte mail de démonstration (reçoit les notifications)
+    image: axllent/mailpit:v1.21
+    restart: unless-stopped
+    ports:
+      - "8025:8025"
+
+  # ------------------------------------------------------------ entreprise
+  erp-connector:
+    <<: *app
+    build:
+      context: .
+      dockerfile: services/erp-connector/Dockerfile
+    environment:
+      <<: *app-env
+      DATABASE_URL: sqlite+aiosqlite:////data/erp.db
+      CATALOG_FILE: /config/catalog.json
+      ROOT_PATH: /svc/erp
+    volumes:
+      - ./config:/config:ro
+      - erp-data:/data
+
+  stock-service:
+    <<: *app
+    build:
+      context: .
+      dockerfile: services/stock-service/Dockerfile
+    environment:
+      <<: *app-env
+      DATABASE_URL: postgresql+asyncpg://surfwear:${POSTGRES_PASSWORD:-surfwear}@postgres:5432/stock
+      ERP_URL: http://erp-connector:8000
+      ROOT_PATH: /svc/stock
+    depends_on:
+      <<: *app-deps
+      postgres:
+        condition: service_healthy
+      erp-connector:
+        condition: service_healthy
+
+  order-service:
+    <<: *app
+    build:
+      context: .
+      dockerfile: services/order-service/Dockerfile
+    environment:
+      <<: *app-env
+      DATABASE_URL: postgresql+asyncpg://surfwear:${POSTGRES_PASSWORD:-surfwear}@postgres:5432/orders
+      STOCK_URL: http://stock-service:8000
+      SHOPS_FILE: /config/shops.json
+      ROOT_PATH: /svc/orders
+    volumes:
+      - ./config:/config:ro
+    depends_on:
+      <<: *app-deps
+      postgres:
+        condition: service_healthy
+      stock-service:
+        condition: service_healthy
+
+  notification-service:
+    <<: *app
+    build:
+      context: .
+      dockerfile: services/notification-service/Dockerfile
+    environment:
+      <<: *app-env
+      SMTP_HOST: mailpit
+      SMTP_PORT: "1025"
+      ROOT_PATH: /svc/notifications
+
+  # ------------------------------------------------------------ intégration boutiques
+  shop-connector-rest:   # éditeur A : webhooks JSON signés
+    <<: *app
+    build:
+      context: .
+      dockerfile: services/shop-connector/Dockerfile
+    image: surfwear/shop-connector:latest
+    environment:
+      <<: *app-env
+      ADAPTER: rest
+      VENDOR_A_URL: http://shop-simulator:8000
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-change-me}
+      ROOT_PATH: /svc/connector-rest
+
+  shop-connector-csv:    # éditeur B : fichiers CSV déposés
+    <<: *app
+    image: surfwear/shop-connector:latest   # même image, autre adaptateur
+    environment:
+      <<: *app-env
+      ADAPTER: csv
+      EXCHANGE_DIR: /exchange
+      ROOT_PATH: /svc/connector-csv
+    volumes:
+      - exchange:/exchange
+    depends_on:
+      <<: *app-deps
+      shop-connector-rest:
+        condition: service_started   # garantit que l'image est construite
+
+  # ------------------------------------------------------------ boutiques (simulation)
+  shop-simulator:
+    restart: unless-stopped
+    build:
+      context: .
+      dockerfile: services/shop-simulator/Dockerfile
+    environment:
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-change-me}
+      EXCHANGE_DIR: /exchange
+      ROOT_PATH: /boutiques
+    volumes:
+      - exchange:/exchange:ro
+
+  # ------------------------------------------------------------ point d'entrée
+  gateway:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "${GATEWAY_PORT:-8080}:80"
+    volumes:
+      - ./gateway/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./portal:/usr/share/nginx/html:ro
+    depends_on:
+      order-service:
+        condition: service_healthy
+      stock-service:
+        condition: service_healthy
+      erp-connector:
+        condition: service_healthy
+
+volumes:
+  pg-data:
+  rabbit-data:
+  erp-data:
+  exchange:

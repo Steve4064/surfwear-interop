@@ -1,0 +1,8 @@
+Metadata-Version: 2.4
+Name: surfwear-common
+Version: 1.0.0
+Summary: Bibliothèque partagée : enveloppe d'événements, bus RabbitMQ/mémoire, accès base de données
+Requires-Python: >=3.11
+Requires-Dist: pydantic>=2.6
+Requires-Dist: aio-pika>=9.4
+Requires-Dist: sqlalchemy[asyncio]>=2.0

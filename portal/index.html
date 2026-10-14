@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Portail B2B Surfwear</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">
+      <span class="mark" aria-hidden="true"></span>
+      <div>
+        <strong>Surfwear</strong>
+        <small>Portail des boutiques</small>
+      </div>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button role="tab" class="tab active" data-view="shop">Boutique</button>
+      <button role="tab" class="tab" data-view="warehouse">Entrepôt</button>
+    </nav>
+    <label class="shop-picker">
+      <span>Boutique connectée</span>
+      <select id="shop"></select>
+    </label>
+  </header>
+
+  <main>
+    <!-- ------------------------------------------------------ vue boutique -->
+    <section id="view-shop" class="view">
+      <div class="grid">
+        <article class="card wide">
+          <header class="card-head">
+            <h2>Catalogue et disponibilité</h2>
+            <p class="hint">Disponibilité en temps réel : stock réel moins les quantités déjà promises aux autres boutiques.</p>
+          </header>
+          <table class="table" id="catalog">
+            <thead>
+              <tr><th>Référence</th><th>Désignation</th><th class="num">Prix HT</th>
+                  <th class="num">Disponible</th><th>Prochains lots</th><th class="num">Quantité</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+          <div class="actions">
+            <span id="cart-summary" class="hint">Panier vide</span>
+            <button id="order-btn" class="primary" disabled>Passer la commande</button>
+          </div>
+          <div id="order-result" class="result" hidden></div>
+        </article>
+
+        <article class="card wide">
+          <header class="card-head">
+            <h2>Mes commandes</h2>
+            <p class="hint">Mises à jour automatiquement : reliquats planifiés, réservés, expédiés.</p>
+          </header>
+          <div id="orders" class="orders"></div>
+        </article>
+      </div>
+    </section>
+
+    <!-- ------------------------------------------------------ vue entrepôt -->
+    <section id="view-warehouse" class="view" hidden>
+      <div class="grid">
+        <article class="card wide">
+          <header class="card-head row">
+            <div>
+              <h2>Liste de préparation</h2>
+              <p class="hint">Uniquement des quantités déjà réservées : aucun arbitrage entre boutiques au moment du colis.</p>
+            </div>
+            <button id="dispatch-btn" class="primary">Expédier tous les colis</button>
+          </header>
+          <div id="pickings"></div>
+        </article>
+
+        <article class="card">
+          <header class="card-head"><h2>Annoncer un lot en production</h2></header>
+          <form id="lot-form" class="form">
+            <label>Référence <select name="sku" id="lot-sku"></select></label>
+            <label>Quantité <input name="qty" type="number" min="1" value="20" required></label>
+            <label>Date prévue <input name="eta" type="date" required></label>
+            <button class="primary" type="submit">Annoncer</button>
+          </form>
+        </article>
+
+        <article class="card">
+          <header class="card-head"><h2>Lots attendus</h2></header>
+          <div id="lots"></div>
+        </article>
+
+        <article class="card wide">
+          <header class="card-head"><h2>Bons de livraison émis</h2></header>
+          <div id="shipments"></div>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    Prototype pédagogique · <a href="/svc/orders/docs">API Commandes</a> ·
+    <a href="/svc/stock/docs">API Stock</a> · <a href="/svc/erp/docs">API ERP</a> ·
+    <a href="/boutiques/">Logiciels boutiques simulés</a>
+  </footer>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="app.js"></script>
+</body>
+</html>

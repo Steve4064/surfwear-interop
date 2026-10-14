@@ -1,0 +1,145 @@
+asyncapi: 3.0.0
+info:
+  title: Bus d'événements de l'écosystème surfwear
+  version: 1.0.0
+  description: >
+    Échange RabbitMQ `surfwear.events` de type topic. La clé de routage est le
+    type de l'événement. Chaque service consommateur possède sa propre file
+    durable ; les messages en échec partent dans `surfwear.dead-letters`.
+servers:
+  local:
+    host: rabbitmq:5672
+    protocol: amqp
+    protocolVersion: 0.9.1
+
+channels:
+  orderConfirmed:
+    address: order.confirmed
+    messages: { orderConfirmed: { $ref: '#/components/messages/Order' } }
+  orderUpdated:
+    address: order.updated
+    messages: { orderUpdated: { $ref: '#/components/messages/Order' } }
+  allocationUpdated:
+    address: allocation.updated
+    messages: { allocationUpdated: { $ref: '#/components/messages/AllocationUpdated' } }
+  shipmentDispatched:
+    address: shipment.dispatched
+    messages: { shipmentDispatched: { $ref: '#/components/messages/ShipmentDispatched' } }
+  stockReceived:
+    address: stock.received
+    messages: { stockReceived: { $ref: '#/components/messages/StockReceived' } }
+  stockIncoming:
+    address: stock.incoming
+    messages: { stockIncoming: { $ref: '#/components/messages/StockIncoming' } }
+
+operations:
+  publishOrderConfirmed: { action: send, channel: { $ref: '#/channels/orderConfirmed' }, summary: Service Commandes }
+  publishOrderUpdated: { action: send, channel: { $ref: '#/channels/orderUpdated' }, summary: Service Commandes }
+  publishAllocationUpdated: { action: send, channel: { $ref: '#/channels/allocationUpdated' }, summary: Service Stock }
+  publishShipmentDispatched: { action: send, channel: { $ref: '#/channels/shipmentDispatched' }, summary: Connecteur ERP }
+  publishStockReceived: { action: send, channel: { $ref: '#/channels/stockReceived' }, summary: Connecteur ERP }
+  publishStockIncoming: { action: send, channel: { $ref: '#/channels/stockIncoming' }, summary: Connecteur ERP }
+
+components:
+  schemas:
+    Envelope:
+      type: object
+      required: [id, type, occurred_at, version, source, data]
+      properties:
+        id: { type: string, format: uuid, description: Identifiant unique, sert au dédoublonnage }
+        type: { type: string, example: order.confirmed }
+        occurred_at: { type: string, format: date-time }
+        version: { type: integer, example: 1 }
+        source: { type: string, example: order-service }
+        data: { type: object }
+    Shop:
+      type: object
+      properties:
+        id: { type: string, example: SHOP-BIA }
+        name: { type: string }
+        connector: { type: string, enum: [rest, csv] }
+        email: { type: string }
+    OrderLine:
+      type: object
+      properties:
+        sku: { type: string }
+        name: { type: string }
+        unit_price: { type: number }
+        qty_ordered: { type: integer }
+        qty_reserved: { type: integer }
+        scheduled:
+          type: array
+          items:
+            type: object
+            properties: { qty: { type: integer }, eta: { type: string, format: date }, lot_id: { type: string } }
+        qty_unscheduled: { type: integer }
+        qty_shipped: { type: integer }
+  messages:
+    Order:
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              data:
+                type: object
+                properties:
+                  order_id: { type: string }
+                  shop: { $ref: '#/components/schemas/Shop' }
+                  status: { type: string, enum: [confirmed, backordered, partially_shipped, shipped] }
+                  created_at: { type: string, format: date-time }
+                  total_amount: { type: number }
+                  lines: { type: array, items: { $ref: '#/components/schemas/OrderLine' } }
+                  change: { type: object, description: Détail de l'allocation (order.updated uniquement) }
+    AllocationUpdated:
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              data:
+                type: object
+                properties:
+                  order_id: { type: string }
+                  sku: { type: string }
+                  qty: { type: integer }
+                  status: { type: string, enum: [scheduled, reserved, unscheduled] }
+                  previous: { type: string, enum: [lot, unscheduled, stock] }
+                  eta: { type: string, format: date }
+                  lot_id: { type: string }
+    ShipmentDispatched:
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              data:
+                type: object
+                properties:
+                  shipment_id: { type: string, description: Numéro du bon de livraison }
+                  order_id: { type: string }
+                  shop: { $ref: '#/components/schemas/Shop' }
+                  dispatched_at: { type: string, format: date-time }
+                  lines:
+                    type: array
+                    items: { type: object, properties: { sku: { type: string }, name: { type: string }, qty: { type: integer } } }
+    StockReceived:
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              data: { type: object, properties: { lot_id: { type: string }, sku: { type: string }, qty: { type: integer } } }
+    StockIncoming:
+      payload:
+        allOf:
+          - $ref: '#/components/schemas/Envelope'
+          - type: object
+            properties:
+              data:
+                type: object
+                properties:
+                  lot_id: { type: string }
+                  sku: { type: string }
+                  qty: { type: integer }
+                  eta: { type: string, format: date }
