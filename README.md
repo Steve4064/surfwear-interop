@@ -83,6 +83,12 @@ docker compose ps               # tout doit être « healthy », zitadel-bootstr
 
 Repartir de zéro : `docker compose down -v && docker compose up -d --build`.
 
+**Sur macOS, sans terminal** : double-cliquer dans le Finder sur
+`scripts/mac/lancer-surfwear.command` (crée `.env` avec des ports libres et des secrets
+aléatoires, ouvre Docker Desktop si besoin, démarre sans effacer les données), puis, pour
+une adresse publique, sur `scripts/mac/tunnel-surfwear.command` (Cloudflare, ou Pinggy par
+le port 443 si le réseau bloque Cloudflare). Journaux dans `logs/`.
+
 ### Comptes de démonstration
 
 | E-mail | Mot de passe | Rôle |
