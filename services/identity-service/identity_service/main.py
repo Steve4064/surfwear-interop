@@ -209,7 +209,7 @@ def create_app(
             if claims["role"] == "shop" and shop is None:
                 return None
             return {"user": claims["sub"], "role": claims["role"], "name": claims.get("name", ""),
-                    "shop": shop, "idt": claims.get("idt")}
+                    "shop": shop}
 
     async def current(
         authorization: str | None = Header(None),
@@ -266,7 +266,7 @@ def create_app(
             log.warning("Connexion ZITADEL échouée : %s", exc)
             return fail("La connexion a échoué, réessayez")
         name = info.get("name") or info.get("preferred_username") or info.get("email", "")
-        claims = {"sub": info["sub"], "name": name, "idt": tokens.get("id_token")}
+        claims = {"sub": info["sub"], "name": name}
         if staff_role(info):
             claims.update(role="staff", shop=None)
         else:
@@ -300,7 +300,7 @@ def create_app(
     async def logout(response: Response, p: dict | None = Depends(current)):
         response.delete_cookie(security.COOKIE_NAME, path="/")
         if provider == "zitadel" and state["zitadel"]:
-            return {"logout_url": state["zitadel"].end_session_url((p or {}).get("idt"))}
+            return {"logout_url": state["zitadel"].end_session_url()}
         return {"logout_url": None}
 
     @app.get("/api/auth/me", tags=["connexion"], summary="Utilisateur connecté")

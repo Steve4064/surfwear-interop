@@ -16,7 +16,7 @@ import logging
 import secrets
 from dataclasses import dataclass
 from pathlib import Path
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlparse
 
 import httpx
 
@@ -72,6 +72,13 @@ class ZitadelClient:
     def _headers(self, extra: dict | None = None) -> dict:
         return {"Host": self.s.host_header, **(extra or {})}
 
+    def _oidc_headers(self, extra: dict | None = None) -> dict:
+        """En-têtes des appels OIDC internes : ZITADEL doit voir l'adresse publique
+        (hôte + port + schéma) pour que l'émetteur des jetons soit celui du navigateur."""
+        u = urlparse(self.s.public_url)
+        return {"Host": u.netloc or self.s.host_header, "X-Forwarded-Proto": u.scheme or "http",
+                "X-Forwarded-Host": u.netloc or self.s.host_header, **(extra or {})}
+
     # ------------------------------------------------------------ OIDC
     def authorize_url(self, state: str, challenge: str, prompt: str | None = None, login_hint: str | None = None) -> str:
         params = {
@@ -89,10 +96,10 @@ class ZitadelClient:
             params["login_hint"] = login_hint
         return f"{self.s.public_url}/oauth/v2/authorize?{urlencode(params)}"
 
-    def end_session_url(self, id_token: str | None) -> str:
+    def end_session_url(self, id_token: str | None = None) -> str:
+        # Pas d'id_token_hint : client_id suffit à ZITADEL pour valider l'adresse de retour,
+        # et un jeton émis pendant une autre session (ou expiré) ferait échouer la déconnexion.
         params = {"post_logout_redirect_uri": self.s.post_logout_uri, "client_id": self.s.client_id}
-        if id_token:
-            params["id_token_hint"] = id_token
         return f"{self.s.public_url}/oidc/v1/end_session?{urlencode(params)}"
 
     async def exchange_code(self, code: str, verifier: str) -> dict:
@@ -101,7 +108,7 @@ class ZitadelClient:
             data={"grant_type": "authorization_code", "code": code, "redirect_uri": self.s.redirect_uri,
                   "code_verifier": verifier},
             auth=(self.s.client_id, self.s.client_secret),
-            headers=self._headers(),
+            headers=self._oidc_headers(),
         )
         if r.status_code != 200:
             raise ZitadelError(f"Échange du code refusé ({r.status_code}) : {r.text[:200]}")
@@ -109,7 +116,7 @@ class ZitadelClient:
 
     async def userinfo(self, access_token: str) -> dict:
         r = await self.http.get("/oidc/v1/userinfo",
-                                headers=self._headers({"Authorization": f"Bearer {access_token}"}))
+                                headers=self._oidc_headers({"Authorization": f"Bearer {access_token}"}))
         if r.status_code != 200:
             raise ZitadelError(f"Profil utilisateur indisponible ({r.status_code})")
         return r.json()

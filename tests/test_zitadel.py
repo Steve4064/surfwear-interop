@@ -27,13 +27,16 @@ def fake_zitadel():
     st = {"codes": {}, "tokens": {}, "orgs": []}
 
     def instance(host: str | None):
-        if host != "localhost":
+        # ZITADEL reconnaît l'instance par le nom d'hôte, port ignoré
+        if (host or "").split(":")[0] != "localhost":
             raise HTTPException(404, "Instance not found")
 
     @app.post("/oauth/v2/token")
     async def token(request: Request, code: str = Form(), code_verifier: str = Form(), redirect_uri: str = Form(),
                     grant_type: str = Form(), host: str = Header(None), authorization: str = Header("")):
         instance(host)
+        # l'émetteur des jetons dépend de l'hôte vu par ZITADEL : il doit être l'adresse publique
+        assert host == "localhost:8081" and request.headers.get("x-forwarded-proto") == "http"
         assert grant_type == "authorization_code" and redirect_uri == "http://localhost:8080/api/auth/callback"
         assert base64.b64decode(authorization.split()[1]).decode() == "client-123:secret-xyz"
         entry = st["codes"].pop(code, None)  # usage unique
@@ -107,7 +110,7 @@ async def test_staff_login_through_zitadel(ident):
     check = await client.get("/api/auth/check", params={"role": "staff"})
     assert check.status_code == 204 and check.headers["x-auth-role"] == "staff"
     out = (await client.post("/api/auth/logout")).json()
-    assert out["logout_url"].startswith("http://localhost:8081/oidc/v1/end_session?") and "id_token_hint=idt-c1" in out["logout_url"]
+    assert out["logout_url"].startswith("http://localhost:8081/oidc/v1/end_session?") and "id_token_hint" not in out["logout_url"] and "client_id=" in out["logout_url"]
 
 
 async def test_shop_user_mapped_by_organisation(ident):
