@@ -356,3 +356,12 @@ a.btn-ghost { color: var(--ink); }
 .nav button { white-space: nowrap; padding: 8px 10px; }
 .topbar { gap: 20px; }
 @media (max-width: 1180px) { .who #who-name { display: none; } }
+
+/* Assistant IA */
+.ai-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin-bottom: 8px; align-items: start; }
+.ai-grid h2 { margin-top: 0; }
+.copy-row { display: flex; gap: 8px; margin-top: 6px; }
+.copy-row input { flex: 1; min-width: 0; font-family: ui-monospace, Menlo, monospace; font-size: 12px; }
+.code { background: var(--foam); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px;
+  font: 12px/1.5 ui-monospace, Menlo, monospace; white-space: pre-wrap; word-break: break-all; margin: 4px 0 12px; }
+.ai-tools { padding-left: 20px; line-height: 1.8; }

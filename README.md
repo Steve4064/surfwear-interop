@@ -20,20 +20,21 @@ Surfwear Pro remplace ce circuit :
 ## 1. Architecture
 
 ```
- Navigateur (portail)            Logiciels des boutiques (clé d'API)
-        │                                 │
-        ▼                                 ▼
- ┌─────────────────────── Passerelle Nginx :8080 ───────────────────────┐
- │  auth_request → service Identité ; identité vérifiée → X-Auth-*      │
- └──┬──────────┬─────────┬─────────┬──────────┬──────────┬──────────┬───┘
-    ▼          ▼         ▼         ▼          ▼          ▼          ▼
- Identité  Catalogue  Panier   Commandes  Facturation  Stock    Entrepôt
-    │  ▲        │ REST    │ REST    │ REST     ▲  PDF     ▲          │
-    │  │        └─► Stock └─► Cmd   └─► Stock  │          │          │
-    │  │ OIDC                                  │          │          │
-    ▼  │                                       │          │          │
- ZITADEL :8081 (API + page de connexion)       │          │          │
- ══════════════════════ Bus RabbitMQ « surfwear.events » ═════════════════
+ Navigateur (portail)     Logiciels des boutiques (clé d'API)     Assistant IA (client MCP)
+        │                          │                                   │ jeton personnel
+        ▼                          ▼                                   ▼
+ ┌──────────────────────────── API Gateway Kong :8080 ─────────────────────────────┐
+ │ routes déclaratives (gateway/kong.yml) · contrôle d'accès via Identité → X-Auth-* │
+ │ limitation de débit · X-Request-Id · en-têtes de sécurité · /internal jamais exposé│
+ └──┬──────────┬─────────┬─────────┬──────────┬──────────┬─────────┬──────────┬─────┘
+    ▼          ▼         ▼         ▼          ▼          ▼         ▼          ▼
+ Portail   Identité  Catalogue  Panier  Commandes  Facturation  Entrepôt  Serveur MCP
+ (statique)  │  ▲        │ REST    │ REST    │ REST     ▲  PDF      │        │ outils
+             │  │        └─► Stock └─► Cmd   └─► Stock  │           │        └─► Catalogue, Stock,
+             │  │ OIDC                                  │           │            Panier, Commandes,
+             ▼  │                                       │           │            Facturation,
+ ZITADEL :8081 (API + page de connexion)                │           │            Entrepôt, Identité
+ ══════════════════════════ Bus RabbitMQ « surfwear.events » ══════════════════════════
      │ order.* · allocation.updated · shipment.dispatched · invoice.issued
      │ stock.* · product.* · shop.registered / shop.approved
      ▼                  ▼                       ▼
@@ -43,7 +44,7 @@ Surfwear Pro remplace ce circuit :
 
 | Microservice | Responsabilité | Données |
 | --- | --- | --- |
-| `identity-service` | Connexion OIDC avec ZITADEL, inscription B2B, validation des boutiques, clés d'API, contrôle d'accès pour la passerelle | PostgreSQL `identity` |
+| `identity-service` | Connexion OIDC avec ZITADEL, inscription B2B, validation des boutiques, clés d'API, contrôle d'accès pour l'API Gateway, jetons personnels | PostgreSQL `identity` |
 | `catalog-service` | Référentiel produits (ajout, modification, masquage), catalogue des boutiques enrichi de la disponibilité | PostgreSQL `catalog` |
 | `cart-service` | Panier de chaque utilisateur, conservé côté serveur ; validation = pré-réservation | PostgreSQL `cart` |
 | `order-service` | Pré-réservation, finalisation, expiration, annulation, suivi | PostgreSQL `orders` |
@@ -53,18 +54,23 @@ Surfwear Pro remplace ce circuit :
 | `notification-service` | Mails : commande, reliquat, expédition, facture, inscription, validation | — |
 | `shop-connector-rest` / `-csv` | Adaptateurs des éditeurs A (webhooks signés) et B (CSV) | volume `exchange` |
 | `shop-simulator` | Logiciels des boutiques simulés (démonstration) | mémoire |
+| `mcp-server` | Serveur MCP : expose les microservices à des assistants IA sous forme d'outils (21 outils boutique et Surfwear) | — |
+| `gateway` | API Gateway Kong 3.9 en mode déclaratif : routage, contrôle d'accès, limitation de débit | `gateway/kong.yml` |
+| `portal` | Portail web (fichiers statiques) | — |
 | ZITADEL v4.16 | Fournisseur d'identité : `zitadel-api`, `zitadel-login`, `zitadel-proxy` (Traefik), `zitadel-bootstrap` | PostgreSQL `zitadel` |
-| Infrastructure | Nginx (passerelle), RabbitMQ, PostgreSQL 16, Mailpit | volumes |
+| Infrastructure | RabbitMQ, PostgreSQL 16, Mailpit | volumes |
 
-**Une base par service.** Les services ne lisent jamais la base d'un autre service : ils passent par une API interne (`/internal/...`, jamais exposée par la passerelle) ou par un événement.
+**Une base par service.** Les services ne lisent jamais la base d'un autre service : ils passent par une API interne (`/internal/...`, jamais exposée par l'API Gateway) ou par un événement.
 
-**Identité.** La passerelle vérifie chaque requête protégée auprès du service Identité (`auth_request`). Celui-ci renvoie l'identité vérifiée (utilisateur, rôle, boutique), que la passerelle transmet aux services dans les en-têtes `X-Auth-*`. Ces en-têtes sont toujours écrasés s'ils viennent du client, et les services ne sont pas joignables hors du réseau Docker.
+**API Gateway.** Kong est le seul point d'entrée : sa configuration (`gateway/kong.yml`, sans base de données) déclare un service par microservice et les routes publiques de chacun. Un plugin `pre-function` (quelques lignes de Lua) vérifie chaque route étiquetée `auth-any` ou `auth-staff` auprès du service Identité (`/api/auth/check`). Celui-ci renvoie l'identité vérifiée (utilisateur, rôle, boutique), que Kong transmet au service dans les en-têtes `X-Auth-*`. Ces en-têtes sont toujours effacés s'ils viennent du client, et les services ne sont pas joignables hors du réseau Docker. Kong limite aussi le débit (connexion, inscription, MCP), ajoute un identifiant de requête `X-Request-Id` et des en-têtes de sécurité. La configuration est validée à la construction de l'image (`kong config parse`).
+
+**Serveur MCP.** Le *Model Context Protocol* permet à un assistant IA (Claude, par exemple) d'utiliser des outils. Le serveur MCP est placé **derrière** l'API Gateway : assistant → Kong (`/mcp`, authentification) → serveur MCP → microservices. Il ne détient aucun droit propre : chaque outil appelle le microservice concerné en relayant l'identité vérifiée par Kong, donc les règles d'accès restent celles des services. Transport *Streamable HTTP* sans état, réponses JSON.
 
 ---
 
 ## 2. Démarrage
 
-Prérequis : Docker Desktop (4 Go de RAM alloués conseillés) et les ports **8080** (portail), **8081** (ZITADEL), **8025** (mails) et **15672** (RabbitMQ) libres.
+Prérequis : Docker Desktop (4 Go de RAM alloués conseillés) et les ports **8080** (API Gateway : portail, API, MCP), **8081** (ZITADEL), **8025** (mails) et **15672** (RabbitMQ) libres.
 
 ```bash
 cp .env.example .env            # puis changez les secrets
@@ -78,6 +84,7 @@ docker compose ps               # tout doit être « healthy », zitadel-bootstr
 | Connexion ZITADEL (redirection automatique) | <http://localhost:8081> |
 | Console d'administration ZITADEL | <http://localhost:8081/ui/console> (`zitadel-admin` / `Password1!`) |
 | Documentation des API | `http://localhost:8080/svc/<service>/docs` (`identity`, `catalog`, `cart`, `orders`, `billing`, `stock`, `warehouse`) |
+| Serveur MCP (assistants IA) | `http://localhost:8080/mcp` (jeton créé dans le portail, menu « Assistant IA ») |
 | Mails envoyés | <http://localhost:8025> |
 | Console RabbitMQ | <http://localhost:15672> (`surfwear` / `surfwear`) |
 
@@ -131,12 +138,12 @@ Le scénario complet se rejoue aussi en ligne de commande : `./scripts/demo.sh`.
 
 ---
 
-## 4. Principales routes (via la passerelle)
+## 4. Principales routes (via l'API Gateway)
 
 | Route | Service | Accès |
 | --- | --- | --- |
 | `GET /api/auth/login` · `/api/auth/callback` · `POST /api/auth/logout` · `GET /api/auth/me` | Identité | public |
-| `POST /api/register` | Identité | public (limité à 5 essais par minute) |
+| `POST /api/register` | Identité | public (limité à 10 essais par minute) |
 | `GET /api/admin/shops` · `POST /api/admin/shops/{id}/approve` · `reject` · `suspend` | Identité | Surfwear |
 | `GET /api/catalog` · `GET /api/catalog/{sku}` | Catalogue | boutique active, Surfwear |
 | `GET/POST /api/products` · `PATCH /api/products/{sku}` | Catalogue | Surfwear |
@@ -145,12 +152,35 @@ Le scénario complet se rejoue aussi en ligne de commande : `./scripts/demo.sh`.
 | `GET /api/admin/orders` | Commandes | Surfwear |
 | `GET /api/invoices` · `GET /api/invoices/{id}/pdf` · `POST /api/invoices/{id}/paid` | Facturation | boutique (les siennes) ; Surfwear (toutes, règlement) |
 | `GET /api/warehouse/pickings` · `POST …/pickings/dispatch` · `…/receptions` · `…/lots` · `…/adjustments` · `GET …/shipments` | Entrepôt | Surfwear |
+| `POST /api/auth/token` | Identité | utilisateur connecté (crée un jeton personnel de 30 jours) |
+| `POST /mcp` | Serveur MCP | boutique active, Surfwear (jeton personnel ou clé d'API) |
 
 Les logiciels des boutiques s'authentifient par l'en-tête `X-API-Key` (clé délivrée à la validation). Les scripts de Surfwear peuvent utiliser `STAFF_API_KEY`, désactivée si elle est vide.
 
 ---
 
-## 5. Événements
+## 5. Assistant IA (serveur MCP)
+
+1. Dans le portail, ouvrir **Assistant IA** et cliquer sur **Créer un jeton** (valable 30 jours, avec les droits de l'utilisateur).
+2. Ajouter le serveur à l'assistant. Le portail affiche les commandes prêtes à copier, par exemple pour Claude Code :
+
+```bash
+claude mcp add --transport http surfwear-pro http://localhost:8080/mcp --header "Authorization: Bearer <jeton>"
+```
+
+Un logiciel de boutique peut aussi utiliser sa clé d'API (`X-API-Key`). Sans identifiant, Kong répond 401 avant d'atteindre le serveur MCP.
+
+| Pour | Outils |
+| --- | --- |
+| Tous | `qui_suis_je`, `rechercher_produits`, `fiche_produit`, `verifier_disponibilite`, `factures` |
+| Boutiques | `voir_panier`, `modifier_panier`, `vider_panier`, `commander_panier` (pré-réservation), `mes_commandes`, `detail_commande`, `finaliser_commande`, `annuler_commande` |
+| Équipe Surfwear | `tableau_de_bord`, `toutes_les_commandes`, `boutiques`, `valider_boutique`, `stock_entrepot`, `preparations`, `expedier`, `enregistrer_reception` |
+
+Exemples de demandes : « Qu'est-ce qui est disponible en combinaisons 4/3 ? Mets-en 3 dans le panier et commande », « Quelles pré-réservations expirent bientôt ? », « Fais-moi le point de la journée : préparations, stock bas, impayés ».
+
+---
+
+## 6. Événements
 
 | Événement | Producteur | Consommateurs |
 | --- | --- | --- |
@@ -166,15 +196,15 @@ Les messages sont décrits dans `libs/common/surfwear_common/events.py` (et en A
 
 ---
 
-## 6. Tests et mode sans Docker
+## 7. Tests et mode sans Docker
 
 ```bash
 pip install -r scripts/requirements-dev.txt
-python -m pytest -q             # 21 tests
-python scripts/dev_server.py    # tout l'écosystème dans un processus, sur http://localhost:8080
+python -m pytest -q             # 34 tests
+python scripts/dev_server.py    # tout l'écosystème dans un processus (portail et /mcp), sur http://localhost:8080
 ```
 
-Les tests lancent tous les microservices dans un même processus, derrière une passerelle locale qui applique les mêmes règles d'accès que Nginx (`scripts/local_gateway.py`). Le mode sans Docker remplace ZITADEL par des comptes locaux (`AUTH_PROVIDER=local`), avec les mêmes identifiants.
+Les tests lancent tous les microservices dans un même processus, derrière une passerelle locale qui lit `gateway/kong.yml` et en applique les routes et les règles d'accès (`scripts/local_gateway.py`). Le mode sans Docker remplace ZITADEL par des comptes locaux (`AUTH_PROVIDER=local`), avec les mêmes identifiants.
 
 | Fichier | Ce qui est vérifié |
 | --- | --- |
@@ -183,10 +213,12 @@ Les tests lancent tous les microservices dans un même processus, derrière une 
 | `test_accounts_and_warehouse.py` | Inscription, attente, validation avec clé d'API, suspension ; refus des en-têtes d'identité forgés ; routes internes non exposées ; ajout de produit, réception libre, inventaire |
 | `test_zitadel.py` | Flux OIDC contre un faux ZITADEL qui contrôle PKCE, code à usage unique, client, Host de l'instance ; rôle `staff`, rattachement par organisation, utilisateur sans boutique refusé, création d'organisation |
 | `test_units.py` | Routage du bus, dédoublonnage, formats JSON et CSV des éditeurs |
+| `test_gateway.py` | Code Lua du contrôle d'accès de Kong exécuté dans un interpréteur Lua (en-têtes effacés puis transmis, refus 401/403/502, réécriture, redirection) ; routes de `kong.yml` ; jeton personnel |
+| `test_mcp.py` | Client MCP réel → passerelle → serveur MCP → services : catalogue, panier, pré-réservation et finalisation par une boutique ; tableau de bord et réception par Surfwear ; outils refusés selon le rôle ; 401 sans identifiant |
 
 ---
 
-## 7. Configuration (`.env`)
+## 8. Configuration (`.env`)
 
 | Variable | Défaut | Rôle |
 | --- | --- | --- |
@@ -198,11 +230,12 @@ Les tests lancent tous les microservices dans un même processus, derrière une 
 | `LOGIN_SESSION_COOKIE_SECRET` | à changer | Session de la page de connexion ZITADEL |
 | `STAFF_API_KEY` | vide | Clé technique de l'équipe Surfwear (scripts) |
 | `HOLD_MINUTES` | `15` | Durée de la pré-réservation |
+| `API_TOKEN_DAYS` | `30` | Durée de validité des jetons personnels (API, assistant IA) |
 | `POSTGRES_PASSWORD`, `RABBITMQ_*`, `WEBHOOK_SECRET` | démo | Secrets d'infrastructure |
 
 ---
 
-## 8. Limites du prototype
+## 9. Limites du prototype
 
 | Prototype | Cible |
 | --- | --- |
@@ -213,3 +246,5 @@ Les tests lancent tous les microservices dans un même processus, derrière une 
 | Événement publié après la transaction | Patron *transactional outbox* |
 | Une instance PostgreSQL pour toutes les bases | Une instance par service, répliquée |
 | Paiement des factures saisi à la main | Rapprochement bancaire ou prélèvement |
+| Jeton personnel signé par le service Identité, non révocable avant expiration | Autorisation OAuth du serveur MCP auprès de ZITADEL, jetons révocables |
+| Kong en mode déclaratif (rechargé au redémarrage) | Kong avec base ou piloté par decK depuis la CI, plusieurs instances derrière un équilibreur |

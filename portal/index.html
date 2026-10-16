@@ -152,6 +152,33 @@
         </table></div>
       </section>
 
+      <!-- ---------------------------------------------------- assistant IA (MCP) -->
+      <section data-view="ai" class="view" hidden>
+        <div class="view-head"><div><h1>Assistant IA</h1>
+          <p class="lede">Reliez un assistant compatible MCP (Claude, par exemple) à Surfwear Pro : il consulte et agit avec vos droits, via l'API Gateway.</p></div></div>
+        <div class="ai-grid">
+          <div class="panel">
+            <h2>1. Créer un jeton d'accès</h2>
+            <p class="hint">Le jeton remplace votre connexion pour l'assistant. Il expire au bout de 30 jours ; ne le partagez pas.</p>
+            <button id="ai-token" class="btn btn-primary" type="button">Créer un jeton</button>
+            <div id="ai-token-out" hidden>
+              <label class="hint" for="ai-token-value">Jeton (valable jusqu'au <span id="ai-token-exp"></span>)</label>
+              <div class="copy-row"><input id="ai-token-value" readonly><button class="btn btn-ghost btn-small" type="button" data-copy="#ai-token-value">Copier</button></div>
+            </div>
+          </div>
+          <div class="panel">
+            <h2>2. Ajouter le serveur MCP</h2>
+            <p class="hint">Adresse du serveur : <code id="ai-url"></code></p>
+            <p class="hint"><strong>Claude Code</strong> : <button class="btn btn-ghost btn-small" type="button" data-copy="#ai-claude-code">Copier</button></p>
+            <pre id="ai-claude-code" class="code"></pre>
+            <p class="hint"><strong>Claude Desktop</strong> (fichier <code>claude_desktop_config.json</code>) : <button class="btn btn-ghost btn-small" type="button" data-copy="#ai-claude-desktop">Copier</button></p>
+            <pre id="ai-claude-desktop" class="code"></pre>
+          </div>
+        </div>
+        <h2>Ce que l'assistant peut faire</h2>
+        <ul id="ai-tools" class="ai-tools"></ul>
+      </section>
+
       <!-- ---------------------------------------------------- Surfwear : vue d'ensemble -->
       <section data-view="overview" class="view" hidden>
         <div class="view-head"><div><h1>Vue d'ensemble</h1>

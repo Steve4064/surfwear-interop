@@ -18,6 +18,7 @@ from billing_service.main import create_app as create_billing
 from cart_service.main import create_app as create_cart
 from catalog_service.main import create_app as create_catalog
 from identity_service.main import create_app as create_identity
+from mcp_server.main import create_app as create_mcp
 from notification_service.main import create_app as create_notifications
 from order_service.main import create_app as create_orders
 from shop_connector.adapters import VendorARestAdapter, VendorBCsvAdapter
@@ -62,6 +63,10 @@ def build(tmp_path: Path, bus: MemoryBus, hold_minutes: float = 15, sweep_second
     a["conn_rest"] = create_connector(VendorARestAdapter(asgi(a["simulator"], "sim"), SECRET), bus)
     a["conn_csv"] = create_connector(VendorBCsvAdapter(str(exchange)), bus)
     a["notifications"] = create_notifications(bus, smtp_host="")
+    a["mcp"] = create_mcp({"catalog": asgi(a["catalog"], "catalog"), "stock": asgi(a["stock"], "stock"),
+                           "cart": asgi(a["cart"], "cart"), "orders": asgi(a["orders"], "orders"),
+                           "billing": asgi(a["billing"], "billing"), "warehouse": asgi(a["warehouse"], "warehouse"),
+                           "identity": asgi(a["identity"], "identity")})
     return a, exchange
 
 

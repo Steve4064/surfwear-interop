@@ -346,13 +346,50 @@ services:
     volumes:
       - exchange:/exchange:ro
 
-  # ================================================================= point d'entrée
+  # ================================================================= serveur MCP (assistants IA)
+  mcp-server:   # derrière l'API Gateway (/mcp) ; appelle les microservices sur le réseau interne
+    build: { context: ., dockerfile: services/mcp-server/Dockerfile }
+    restart: unless-stopped
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      identity-service:
+        condition: service_healthy
+      catalog-service:
+        condition: service_healthy
+
+  # ================================================================= portail web (statique)
+  portal:
+    build: { context: ., dockerfile: portal-web/Dockerfile }
+    restart: unless-stopped
+
+  # ================================================================= API Gateway (point d'entrée unique)
   gateway:
     build: { context: ., dockerfile: gateway/Dockerfile }
     restart: unless-stopped
     ports:
-      - "${GATEWAY_PORT:-8080}:80"
+      - "${GATEWAY_PORT:-8080}:8000"
+    environment:
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /kong/kong.yml
+      KONG_PROXY_LISTEN: 0.0.0.0:8000
+      KONG_ADMIN_LISTEN: 127.0.0.1:8001      # API d'administration (lecture) : interne au conteneur
+      KONG_STATUS_LISTEN: 0.0.0.0:8100
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+      KONG_UNTRUSTED_LUA_SANDBOX_REQUIRES: resty.http   # client HTTP du contrôle d'accès (pre-function)
+      KONG_TRUSTED_IPS: 0.0.0.0/0,::/0                   # garde X-Forwarded-Proto d'un tunnel HTTPS
+      KONG_NGINX_HTTP_CLIENT_MAX_BODY_SIZE: 1m
+      KONG_DNS_VALID_TTL: "10"                          # suit les conteneurs recréés
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
     depends_on:
+      portal:
+        condition: service_started
       identity-service:
         condition: service_healthy
       catalog-service:
@@ -362,6 +399,8 @@ services:
       order-service:
         condition: service_healthy
       warehouse-service:
+        condition: service_healthy
+      mcp-server:
         condition: service_healthy
 
 volumes:

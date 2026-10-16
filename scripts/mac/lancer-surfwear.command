@@ -41,9 +41,9 @@ for i in $(seq 1 120); do
 done
 docker compose ps -a --format 'table {{.Service}}\t{{.Status}}'
 if [ "$ready" != 1 ]; then
-  for s in zitadel-api zitadel-login zitadel-bootstrap identity-service gateway; do echo "---- $s"; docker compose logs --tail=30 "$s"; done
+  for s in zitadel-api zitadel-login zitadel-bootstrap identity-service mcp-server portal gateway; do echo "---- $s"; docker compose logs --tail=30 "$s"; done
   echo "== ECHEC (démarrage incomplet)"; exit 1
 fi
 open "$BASE"
-echo "== TERMINE : portail $BASE · ZITADEL http://localhost:$ZP · mails http://localhost:8025"
+echo "== TERMINE : portail $BASE · MCP $BASE/mcp · ZITADEL http://localhost:$ZP · mails http://localhost:8025"
 echo "Vous pouvez fermer cette fenêtre : les services continuent de tourner dans Docker."

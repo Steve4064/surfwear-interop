@@ -2,12 +2,13 @@
 
 Tous les microservices tournent dans le processus de test, avec un bus en mémoire
 et SQLite. Les requêtes passent par la passerelle locale (mêmes règles d'accès que
-Nginx) : le contrôle d'accès est donc testé de bout en bout. Le service Identité
+Kong, lues dans gateway/kong.yml) : le contrôle d'accès est donc testé de bout en bout. Le service Identité
 utilise les comptes locaux (AUTH_PROVIDER=local) ; l'intégration ZITADEL est testée
 à part avec un faux fournisseur OIDC (test_zitadel.py).
 """
 from __future__ import annotations
 
+import asyncio
 import sys
 from contextlib import AsyncExitStack
 from pathlib import Path
@@ -47,9 +48,29 @@ async def eco(tmp_path):
                      "conn_rest", "conn_csv", "notifications"):
             app = apps[name]
             await stack.enter_async_context(app.router.lifespan_context(app))
+        await _serve_mcp(stack, apps["mcp"])
         stack.push_async_callback(lambda: _close(clients))
         yield SimpleNamespace(bus=bus, apps=apps, exchange=exchange, client=client, login=login,
                               sweep=apps["orders"].state.sweep_once, orders_session=apps["orders"].state.session)
+
+
+async def _serve_mcp(stack: AsyncExitStack, app) -> None:
+    """Le gestionnaire de sessions MCP (groupe de tâches anyio) doit s'ouvrir et se fermer
+    dans la même tâche : on le fait vivre dans une tâche dédiée pendant le test."""
+    started, stop = asyncio.Event(), asyncio.Event()
+
+    async def run():
+        async with app.router.lifespan_context(app):
+            started.set()
+            await stop.wait()
+
+    task = asyncio.create_task(run())
+    await started.wait()
+
+    async def shutdown():
+        stop.set()
+        await task
+    stack.push_async_callback(shutdown)
 
 
 async def _close(clients):

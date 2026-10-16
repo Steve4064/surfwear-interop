@@ -200,9 +200,9 @@ document.addEventListener("click", async (e) => {
 
 // ------------------------------------------------------------------ navigation
 const NAV = {
-  shop: [["catalog", "Catalogue"], ["cart", "Panier"], ["orders", "Commandes"], ["invoices", "Factures"]],
+  shop: [["catalog", "Catalogue"], ["cart", "Panier"], ["orders", "Commandes"], ["invoices", "Factures"], ["ai", "Assistant IA"]],
   staff: [["overview", "Vue d'ensemble"], ["shops", "Boutiques"], ["all-orders", "Commandes"], ["picking", "Préparation"],
-    ["receiving", "Réceptions"], ["products", "Produits"], ["invoices", "Factures"]],
+    ["receiving", "Réceptions"], ["products", "Produits"], ["invoices", "Factures"], ["ai", "Assistant IA"]],
 };
 
 function start(me) {
@@ -246,6 +246,44 @@ function go(view) {
   refresh(true);
   window.scrollTo({ top: 0 });
 }
+
+// ------------------------------------------------------------------ assistant IA (serveur MCP derrière la gateway)
+const AI_TOOLS = {
+  shop: ["Chercher dans le catalogue et vérifier une disponibilité", "Remplir, vider et commander le panier",
+    "Suivre, finaliser ou annuler ses pré-réservations", "Consulter ses factures"],
+  staff: ["Tableau de bord : commandes, préparations, stock bas, impayés", "Lister et valider les boutiques",
+    "Consulter le stock, les lots et les préparations", "Expédier et enregistrer des réceptions", "Consulter toutes les commandes et factures"],
+};
+
+function renderAi(token = "VOTRE_JETON") {
+  const url = `${location.origin}/mcp`;
+  $("#ai-url").textContent = url;
+  $("#ai-claude-code").textContent =
+    `claude mcp add --transport http surfwear-pro ${url} \\\n  --header "Authorization: Bearer ${token}"`;
+  $("#ai-claude-desktop").textContent = JSON.stringify({ mcpServers: { "surfwear-pro": {
+    command: "npx", args: ["-y", "mcp-remote", url, "--allow-http", "--header", "Authorization:${SURFWEAR_TOKEN}"],
+    env: { SURFWEAR_TOKEN: `Bearer ${token}` } } } }, null, 2);
+  $("#ai-tools").innerHTML = AI_TOOLS[app.me.role].map((t) => `<li>${esc(t)}</li>`).join("");
+}
+
+$("#ai-token").addEventListener("click", async () => {
+  try {
+    const out = await api("/api/auth/token", { method: "POST" });
+    $("#ai-token-value").value = out.token;
+    $("#ai-token-exp").textContent = new Date(out.expires_at).toLocaleDateString("fr-FR");
+    $("#ai-token-out").hidden = false;
+    renderAi(out.token);
+    toast("Jeton créé : copiez-le maintenant, il ne sera plus affiché.");
+  } catch (err) { toast(err.message, "error"); }
+});
+
+document.addEventListener("click", async (e) => {
+  const b = e.target.closest("[data-copy]");
+  if (!b) return;
+  const el = $(b.dataset.copy);
+  try { await navigator.clipboard.writeText(el.value || el.textContent); toast("Copié"); }
+  catch { el.select?.(); toast("Sélectionné : copiez avec ⌘C"); }
+});
 
 // ------------------------------------------------------------------ boutique : catalogue (la quantité = le panier)
 function cartQty(sku) {
@@ -839,6 +877,7 @@ async function refresh(force = false) {
       rememberDeadlines(orders);
       if (first) renderCategories();
       ({ catalog: renderCatalog, cart: renderCart, orders: renderOrders, invoices: renderInvoices })[app.view]?.();
+      if (app.view === "ai" && $("#ai-token-out").hidden) renderAi();
       renderDock();
     } else {
       const v = app.view;
@@ -854,6 +893,7 @@ async function refresh(force = false) {
       rememberDeadlines(orders);
       ({ overview: renderOverview, shops: renderShops, "all-orders": renderAllOrders, picking: renderPicking,
         receiving: renderReceiving, products: renderProducts, invoices: renderInvoices })[v]?.();
+      if (v === "ai" && $("#ai-token-out").hidden) renderAi();
       $("#dock").hidden = true;
     }
     renderNav();

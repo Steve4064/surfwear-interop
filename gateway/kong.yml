@@ -1,0 +1,331 @@
+# API Gateway Kong (mode déclaratif, sans base de données) : point d'entrée unique
+# du portail, des API des microservices et du serveur MCP.
+#
+#   navigateur / logiciel de boutique / assistant IA
+#        └─► Kong ─┬─► portail (fichiers statiques)
+#                  ├─► microservices (/api/...)
+#                  └─► serveur MCP (/mcp) ─► microservices
+#
+# Contrôle d'accès : le plugin global pre-function (Lua, plus bas) interroge le service
+# Identité pour chaque route étiquetée « auth-any » ou « auth-staff », puis transmet
+# l'identité vérifiée au service dans les en-têtes X-Auth-*. Ceux envoyés par le client
+# sont toujours effacés. Étiquette « strip-svc » : /svc/<service>/x est transmis en /x.
+# Les routes /internal/... des services ne sont jamais exposées.
+_format_version: "3.0"
+_transform: true
+
+plugins:
+  - name: pre-function
+    config:
+      access:
+        - |
+          local AUTH = { "X-Auth-User", "X-Auth-Role", "X-Auth-Shop", "X-Auth-Name" }
+          for _, h in ipairs(AUTH) do
+            kong.service.request.clear_header(h)
+          end
+
+          local route = kong.router.get_route()
+          local tags = {}
+          for _, t in ipairs((route and route.tags) or {}) do
+            tags[t] = true
+          end
+          local path = kong.request.get_path()
+
+          if tags["slash-redirect"] and not path:find("/", 2, true) then
+            return kong.response.exit(301, "", { ["Location"] = path .. "/" })
+          end
+          if tags["strip-svc"] then
+            local rewritten = path:gsub("^/svc/[^/]+", "")
+            kong.service.request.set_path(rewritten)
+          end
+
+          local need = (tags["auth-staff"] and "staff") or (tags["auth-any"] and "any") or nil
+          if not need then
+            return
+          end
+
+          local headers = {}
+          for _, h in ipairs({ "cookie", "authorization", "x-api-key" }) do
+            local v = kong.request.get_header(h)
+            if v then
+              headers[h] = v
+            end
+          end
+          local http = require("resty.http")
+          local httpc = http.new()
+          httpc:set_timeout(3000)
+          local res, err = httpc:request_uri("http://identity-service:8000/api/auth/check?role=" .. need,
+            { method = "GET", headers = headers })
+          if not res then
+            kong.log.err("service Identité injoignable : ", err)
+            return kong.response.exit(502, { detail = "Service Identité indisponible" })
+          end
+          if res.status == 401 then
+            return kong.response.exit(401, { detail = "Connexion requise" })
+          end
+          if res.status == 403 then
+            return kong.response.exit(403, { detail = "Accès refusé : compte en attente de validation ou réservé à l'équipe Surfwear" })
+          end
+          if res.status ~= 204 then
+            kong.log.err("contrôle d'accès : réponse inattendue ", res.status)
+            return kong.response.exit(502, { detail = "Contrôle d'accès indisponible" })
+          end
+          for _, h in ipairs(AUTH) do
+            local v = res.headers[h] or res.headers[h:lower()]
+            if type(v) == "table" then
+              v = v[1]
+            end
+            if v and v ~= "" then
+              kong.service.request.set_header(h, v)
+            end
+          end
+
+  - name: correlation-id
+    config:
+      header_name: X-Request-Id
+      generator: uuid
+      echo_downstream: true
+
+  - name: response-transformer
+    config:
+      add:
+        headers:
+          - "X-Content-Type-Options:nosniff"
+          - "X-Frame-Options:DENY"
+          - "Referrer-Policy:same-origin"
+
+services:
+  # ------------------------------------------------------------------ portail (public)
+  - name: portal
+    url: http://portal:80
+    routes:
+      - name: portal
+        paths: ["/"]
+        strip_path: false
+        preserve_host: true
+      - name: not-exposed       # tout /api, /svc ou /internal sans route dédiée : 404
+        paths: ["/api/", "/svc/", "/internal/"]
+        strip_path: false
+        plugins:
+          - name: request-termination
+            config:
+              status_code: 404
+              content_type: application/json
+              body: '{"detail":"Not Found"}'
+
+  # ------------------------------------------------------------------ identité (publique)
+  - name: identity
+    url: http://identity-service:8000
+    connect_timeout: 3000
+    read_timeout: 20000
+    routes:
+      - name: identity-login
+        paths: ["/api/auth/login"]
+        strip_path: false
+        preserve_host: true
+        plugins:
+          - name: rate-limiting
+            config: { minute: 20, policy: local, limit_by: ip }
+      - name: identity-register
+        paths: ["/api/register"]
+        strip_path: false
+        preserve_host: true
+        plugins:
+          - name: rate-limiting
+            config: { minute: 10, policy: local, limit_by: ip }
+      - name: identity-auth
+        paths: ["/api/auth/"]
+        strip_path: false
+        preserve_host: true
+      - name: identity-admin-shops      # le service vérifie lui-même le rôle
+        paths: ["/api/admin/shops"]
+        strip_path: false
+        preserve_host: true
+
+  # ------------------------------------------------------------------ boutiques et Surfwear
+  - name: catalog
+    url: http://catalog-service:8000
+    connect_timeout: 3000
+    read_timeout: 20000
+    routes:
+      - name: catalog
+        paths: ["/api/catalog"]
+        strip_path: false
+        preserve_host: true
+        tags: [auth-any]
+      - name: products               # gestion des produits : équipe Surfwear
+        paths: ["/api/products"]
+        strip_path: false
+        preserve_host: true
+        tags: [auth-staff]
+
+  - name: stock
+    url: http://stock-service:8000
+    connect_timeout: 3000
+    read_timeout: 20000
+    routes:
+      - name: availability
+        paths: ["/api/availability"]
+        strip_path: false
+        preserve_host: true
+        tags: [auth-any]
+
+  - name: cart
+    url: http://cart-service:8000
+    connect_timeout: 3000
+    read_timeout: 20000
+    routes:
+      - name: cart
+        paths: ["/api/cart"]
+        strip_path: false
+        preserve_host: true
+        tags: [auth-any]
+
+  - name: orders
+    url: http://order-service:8000
+    connect_timeout: 3000
+    read_timeout: 20000
+    routes:
+      - name: orders
+        paths: ["/api/orders", "/api/admin/orders"]
+        strip_path: false
+        preserve_host: true
+        tags: [auth-any]
+
+  - name: billing
+    url: http://billing-service:8000
+    connect_timeout: 3000
+    read_timeout: 20000
+    routes:
+      - name: invoices
+        paths: ["/api/invoices"]
+        strip_path: false
+        preserve_host: true
+        tags: [auth-any]
+
+  # ------------------------------------------------------------------ Surfwear uniquement
+  - name: warehouse
+    url: http://warehouse-service:8000
+    connect_timeout: 3000
+    read_timeout: 20000
+    routes:
+      - name: warehouse
+        paths: ["/api/warehouse/"]
+        strip_path: false
+        preserve_host: true
+        tags: [auth-staff]
+
+  - name: notifications
+    url: http://notification-service:8000
+    routes:
+      - name: notifications
+        paths: ["/svc/notifications/notifications"]
+        strip_path: false
+        tags: [auth-staff, strip-svc]
+
+  - name: connector-rest
+    url: http://shop-connector-rest:8000
+    routes:
+      - name: connector-rest-stats
+        paths: ["/svc/connector-rest/stats"]
+        strip_path: false
+        tags: [auth-staff, strip-svc]
+
+  - name: connector-csv
+    url: http://shop-connector-csv:8000
+    routes:
+      - name: connector-csv-stats
+        paths: ["/svc/connector-csv/stats"]
+        strip_path: false
+        tags: [auth-staff, strip-svc]
+
+  - name: shop-simulator              # logiciels des boutiques simulés (démonstration)
+    url: http://shop-simulator:8000
+    routes:
+      - name: shop-simulator
+        paths: ["/boutiques"]
+        strip_path: true
+        preserve_host: true
+        tags: [auth-staff, slash-redirect]
+
+  # ------------------------------------------------------------------ serveur MCP (assistants IA)
+  - name: mcp
+    url: http://mcp-server:8000
+    connect_timeout: 3000
+    read_timeout: 60000
+    routes:
+      - name: mcp
+        paths: ["/mcp"]
+        strip_path: false
+        preserve_host: true
+        request_buffering: false
+        response_buffering: false
+        tags: [auth-any]
+        plugins:
+          - name: rate-limiting
+            config: { minute: 300, policy: local, limit_by: ip }
+
+  # ------------------------------------------------------------------ documentation OpenAPI (lecture)
+  - name: identity-docs
+    url: http://identity-service:8000
+    routes:
+      - name: identity-docs
+        paths: ["/svc/identity/docs", "/svc/identity/openapi.json", "/svc/identity/health"]
+        strip_path: false
+        tags: [strip-svc]
+  - name: catalog-docs
+    url: http://catalog-service:8000
+    routes:
+      - name: catalog-docs
+        paths: ["/svc/catalog/docs", "/svc/catalog/openapi.json", "/svc/catalog/health"]
+        strip_path: false
+        tags: [strip-svc]
+  - name: cart-docs
+    url: http://cart-service:8000
+    routes:
+      - name: cart-docs
+        paths: ["/svc/cart/docs", "/svc/cart/openapi.json", "/svc/cart/health"]
+        strip_path: false
+        tags: [strip-svc]
+  - name: orders-docs
+    url: http://order-service:8000
+    routes:
+      - name: orders-docs
+        paths: ["/svc/orders/docs", "/svc/orders/openapi.json", "/svc/orders/health"]
+        strip_path: false
+        tags: [strip-svc]
+  - name: billing-docs
+    url: http://billing-service:8000
+    routes:
+      - name: billing-docs
+        paths: ["/svc/billing/docs", "/svc/billing/openapi.json", "/svc/billing/health"]
+        strip_path: false
+        tags: [strip-svc]
+  - name: stock-docs
+    url: http://stock-service:8000
+    routes:
+      - name: stock-docs
+        paths: ["/svc/stock/docs", "/svc/stock/openapi.json", "/svc/stock/health"]
+        strip_path: false
+        tags: [strip-svc]
+  - name: warehouse-docs
+    url: http://warehouse-service:8000
+    routes:
+      - name: warehouse-docs
+        paths: ["/svc/warehouse/docs", "/svc/warehouse/openapi.json", "/svc/warehouse/health"]
+        strip_path: false
+        tags: [strip-svc]
+  - name: notifications-docs
+    url: http://notification-service:8000
+    routes:
+      - name: notifications-docs
+        paths: ["/svc/notifications/docs", "/svc/notifications/openapi.json", "/svc/notifications/health"]
+        strip_path: false
+        tags: [strip-svc]
+  - name: mcp-health
+    url: http://mcp-server:8000
+    routes:
+      - name: mcp-health
+        paths: ["/svc/mcp/health"]
+        strip_path: false
+        tags: [strip-svc]

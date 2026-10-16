@@ -18,7 +18,7 @@ import json
 import re
 import secrets
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import quote, urlparse
 from uuid import uuid4
@@ -308,6 +308,21 @@ def create_app(
         if p is None:
             raise HTTPException(401, "Connexion requise")
         return me_dto(p)
+
+    @app.post("/api/auth/token", tags=["connexion"], summary="Créer un jeton d'accès personnel (API, assistant IA via MCP)")
+    async def personal_token(p: dict | None = Depends(current)):
+        """Jeton à placer dans l'en-tête ``Authorization: Bearer`` d'un client technique,
+        par exemple un assistant IA relié au serveur MCP. Il porte les droits de l'utilisateur."""
+        if p is None:
+            raise HTTPException(401, "Connexion requise")
+        if p["user"].startswith("api:"):
+            raise HTTPException(403, "Un jeton personnel se crée depuis une session utilisateur")
+        days = float(env("API_TOKEN_DAYS", "30"))
+        claims = {"sub": p["user"], "name": p["name"], "role": p["role"],
+                  "shop": p["shop"].id if p["shop"] else None, "kind": "api"}
+        expires = datetime.now(timezone.utc) + timedelta(days=days)
+        return {"token": security.make_token(secret, claims, int(days * 86400)),
+                "token_type": "Bearer", "expires_at": expires.isoformat()}
 
     @app.get("/api/auth/check", tags=["connexion"], include_in_schema=False)
     async def check(response: Response, role: str = Query("any"), p: dict | None = Depends(current)):
